@@ -6,7 +6,7 @@ const https = require('https');
 const http = require('http');
 const { pipeline } = require('stream/promises');
 
-const UA = 'EMBER-Launcher/2.0.5 (https://github.com/ember-launcher)';
+const UA = 'EMBER-Launcher/2.0.6 (https://github.com/ember-launcher)';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function request(url, opts = {}, redirects = 0) {

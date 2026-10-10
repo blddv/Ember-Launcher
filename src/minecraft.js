@@ -222,9 +222,13 @@ async function extractNatives(libs, nativesDir, subdirs = []) {
 }
 
 // Сборка аргументов сбора GC. Java 21+ поддерживает поколенческий ZGC.
+// ZGC есть только в Java 17+. На Java 8 (старые версии Minecraft) флаг -XX:+UseZGC
+// делает запуск невозможным, поэтому там используется G1.
 function gcArgs(preset, javaMajor) {
   switch (preset) {
-    case 'zgc': return javaMajor >= 21 ? ['-XX:+UseZGC', '-XX:+ZGenerational'] : ['-XX:+UseZGC'];
+    case 'zgc':
+      if (javaMajor < 17) return gcArgs('g1', javaMajor);
+      return javaMajor >= 21 ? ['-XX:+UseZGC', '-XX:+ZGenerational'] : ['-XX:+UseZGC'];
     case 'parallel': return ['-XX:+UseParallelGC'];
     case 'serial': return ['-XX:+UseSerialGC'];
     case 'none': return [];
@@ -266,9 +270,13 @@ async function launch(opts) {
     seen.add(l.key);
     cpLibs.push(path.join(dirs.libraries, l.rel));
   }
-  // Forge и NeoForge сами подставляют клиент (свой патченный jar из библиотек),
-  // ванильный jar в classpath для них даёт конфликт модулей. Ванили и Fabric/Quilt он нужен.
-  if (!['forge', 'neoforge'].includes(instance.loader)) cpLibs.push(path.join(dirs.versions, mc, `${mc}.jar`));
+  // Forge 1.13+ и NeoForge сами подставляют клиент (свой патченный jar из библиотек),
+  // ванильный jar в classpath для них даёт конфликт модулей (modlauncher / bootstraplauncher).
+  // Ванили, Fabric, Quilt и старый Forge (launchwrapper, до 1.13) ванильный jar нужен.
+  const modularLauncher = /modlauncher|bootstraplauncher/i.test(merged.mainClass || '');
+  if (!(['forge', 'neoforge'].includes(instance.loader) && modularLauncher)) {
+    cpLibs.push(path.join(dirs.versions, mc, `${mc}.jar`));
+  }
   const classpath = cpLibs.join(sep);
 
   const javaBin = await ensureJava(javaMajor, report);

@@ -1,7 +1,7 @@
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const AdmZip = require('adm-zip');
 const { dirs } = require('./paths');
 const { fetchBuffer } = require('./http');
@@ -17,13 +17,26 @@ function javaExeIn(home) {
   return path.join(home, 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
 }
 
+// Major-версия Java по выводу "java -version" (java 8 пишет "1.8.0_x", java 9+ — "17.0.2").
+function javaMajorOf(bin) {
+  const r = spawnSync(bin, ['-version'], { encoding: 'utf8', windowsHide: true });
+  const text = `${r.stdout || ''}${r.stderr || ''}`;
+  const m = text.match(/version "(\d+)(?:\.(\d+))?/);
+  if (!m) return null;
+  return Number(m[1]) === 1 ? Number(m[2]) : Number(m[1]);
+}
+
 // Возвращает путь к java-исполняемому файлу нужной major-версии.
 // Порядок: ручной путь из настроек -> уже скачанная среда -> скачивание Adoptium JRE.
+// Ручной путь используется, только если его версия не ниже требуемой: Minecraft с новой Java
+// не запустится на старой (UnsupportedClassVersionError), поэтому тогда берём нужную среду.
 async function ensureJava(major, report = () => {}) {
   const custom = store.get('javaPath');
   if (custom && fs.existsSync(custom)) {
-    const st = fs.statSync(custom);
-    return st.isDirectory() ? javaExeIn(custom) : custom;
+    const bin = fs.statSync(custom).isDirectory() ? javaExeIn(custom) : custom;
+    const have = javaMajorOf(bin);
+    if (have === null || have >= major) return bin;
+    report({ stage: 'Java', text: `Указанная Java ${have} ниже нужной (${major}), использую Java ${major}` });
   }
 
   const home = path.join(dirs.runtime, `java-${major}`);
