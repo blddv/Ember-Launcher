@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "orangevisuals",
+  "version": "${version}",
+  "name": "Orange Visuals",
+  "description": "Orange Visuals: HUD, миникарта, полная карта (N) и метки, плавный зум (C), визуальные фильтры и музыкальный плеер в игре. Меню по R SHIFT (клавишу можно сменить в EMBER Launcher).",
+  "authors": ["EMBER"],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.ember.visuals.OrangeVisualsClient"]
+  },
+  "mixins": ["orangevisuals.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
