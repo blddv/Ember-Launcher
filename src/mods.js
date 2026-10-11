@@ -8,6 +8,7 @@ const providers = require('./providers');
 const managed = require('./managed');
 
 const MOD_JAR = 'orange-visuals.jar';          // имя в папке mods сборки
+const RAFT_MOD_JAR = 'ember-raft.jar';         // имя файла EMBER Raft в папке mods сборки
 const DISABLED = '.disabled';
 const CONFIG_FILE = 'orangevisuals.json';
 
@@ -15,6 +16,12 @@ const CONFIG_FILE = 'orangevisuals.json';
 // Для каждой версии и загрузчика собирается отдельный jar.
 const BUILDS = {
   'fabric:1.21.1': 'orange-visuals-fabric-1.21.1.jar',
+};
+
+// Сборки EMBER Raft (режим выживания на плоту): исходники в mods-src/ember-raft.
+// Jar кладётся в mods/ лаунчера после сборки (gradle build).
+const RAFT_BUILDS = {
+  'fabric:1.21.1': 'ember-raft-fabric-1.21.1.jar',
 };
 const SUPPORTED_VERSIONS = [...new Set(Object.keys(BUILDS).map(k => k.split(':')[1]))];
 const FABRIC_API_RE = /^fabric-api.*\.jar$/i;
@@ -109,8 +116,49 @@ async function syncOrangeVisuals(inst, report = () => {}) {
 function isHidden(inst, name) {
   const base = name.replace(/\.disabled$/i, '');
   if (base === MOD_JAR) return true;
+  if (base === RAFT_MOD_JAR) return true;
   if (FABRIC_API_RE.test(base)) return true;
   return managed.isManaged(inst, name);
+}
+
+// Синхронизирует EMBER Raft с настройками лаунчера: включено -> копирует jar,
+// выключено -> удаляет из сборки. Fabric API — обязательная зависимость.
+async function syncEmberRaft(inst, report = () => {}) {
+  const cfg = store.get('emberRaft') || {};
+  const gameDir = instances.getGameDir(inst);
+  const modsDir = path.join(gameDir, 'mods');
+  const jar = path.join(modsDir, RAFT_MOD_JAR);
+
+  if (!cfg.enabled) {
+    await fsp.rm(jar, { force: true });
+    return { active: false, reason: 'выключен в настройках' };
+  }
+  const key = `${inst.loader}:${inst.version}`;
+  if (!RAFT_BUILDS[key]) {
+    await fsp.rm(jar, { force: true });
+    if (inst.loader !== 'fabric') return { active: false, reason: `для ${inst.loader} мод ещё не собран` };
+    return { active: false, reason: `мод для Minecraft ${inst.version} ещё не собран` };
+  }
+  const src = bundledJar(RAFT_BUILDS[key]);
+  if (!src) {
+    await fsp.rm(jar, { force: true });
+    return { active: false, reason: `файл ${RAFT_BUILDS[key]} не найден в сборке лаунчера (соберите из mods-src/ember-raft)` };
+  }
+  await fsp.mkdir(modsDir, { recursive: true });
+  if (!fs.existsSync(jar) || sha1(jar) !== sha1(src)) {
+    report({ stage: 'Мод', text: 'Устанавливаю EMBER Raft…' });
+    await fsp.copyFile(src, jar);
+  }
+  managed.addFiles(inst, [RAFT_MOD_JAR]);
+
+  if (inst.loader === 'fabric') {
+    const hasApi = fs.readdirSync(modsDir).some(f => FABRIC_API_RE.test(f));
+    if (!hasApi) {
+      report({ stage: 'Мод', text: 'Ставлю Fabric API (зависимость)…' });
+      await providers.installModrinthFiles(inst, providers.FABRIC_API_ID, 'mod', { managed: true });
+    }
+  }
+  return { active: true };
 }
 
 // Список модов сборки. Скрыты: Fabric API, Orange Visuals и всё, что поставил сам лаунчер.
@@ -159,5 +207,6 @@ function deleteMod(inst, file) {
 
 module.exports = {
   syncOrangeVisuals, supportState, SUPPORTED_VERSIONS, MOD_JAR, BUILDS,
+  syncEmberRaft, RAFT_BUILDS, RAFT_MOD_JAR,
   listMods, setModEnabled, deleteMod,
 };

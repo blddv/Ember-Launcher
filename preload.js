@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 const inv = (ch, ...args) => ipcRenderer.invoke(ch, ...args);
-const EVENTS = ['progress', 'log', 'game:state', 'mod:status'];
+const EVENTS = ['progress', 'log', 'game:state', 'mod:status', 'raft:status'];
 
 contextBridge.exposeInMainWorld('ember', {
   info: () => inv('app:info'),

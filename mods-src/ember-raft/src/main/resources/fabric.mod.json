@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "ember_raft",
+  "version": "${version}",
+  "name": "EMBER Raft",
+  "description": "Режим выживания в духе Raft: вы появляетесь на маленьком плоту посреди океана. Вытягивайте проплывающий мусор крюком с верёвкой, расширяйте и улучшайте плот досками, а течение будет прибивать плот к островам с припасами на берегу (подбираются ПКМ).",
+  "authors": ["EMBER"],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["com.ember.raft.EmberRaftMod"],
+    "client": ["com.ember.raft.client.EmberRaftClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
