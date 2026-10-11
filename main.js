@@ -198,8 +198,10 @@ async function launchFlow(instanceId) {
     return { ok: true, showLog: !!s.showLogOnLaunch };
   } catch (e) {
     running = null;
-    send('game:state', { running: false, instanceId, error: e.message });
-    throw e;
+    // Любая ошибка (в т.ч. сырая сокетная AggregateError) показывается понятным текстом
+    const message = http.humanizeError(e);
+    send('game:state', { running: false, instanceId, error: message });
+    throw new Error(message);
   }
 }
 

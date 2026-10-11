@@ -32,7 +32,12 @@ async function fetchText(url) {
 
 // versions из maven-metadata.xml, новые — в конце
 async function mavenVersions(url) {
-  const xml = await fetchText(url);
+  let xml;
+  try {
+    xml = await fetchText(url);
+  } catch (e) {
+    throw new Error(`Не удалось получить список версий (${new URL(url).host}): ${e.message}`);
+  }
   return [...xml.matchAll(/<version>([^<]+)<\/version>/g)].map(m => m[1]);
 }
 
@@ -172,7 +177,11 @@ async function ensureLoaderProfile(inst, { report = () => {}, javaMajor = 21 } =
     } else {
       report({ stage: label(loader, lv), text: `Загружаю профиль ${LABEL[loader]} ${lv}` });
       const base = loader === 'fabric' ? FABRIC_META : QUILT_META;
-      profile = await fetchJson(`${base}/versions/loader/${mc}/${lv}/profile/json`);
+      try {
+        profile = await fetchJson(`${base}/versions/loader/${mc}/${lv}/profile/json`);
+      } catch (e) {
+        throw new Error(`Не удалось загрузить профиль ${LABEL[loader]} ${lv}: ${e.message}`);
+      }
       await fsp.mkdir(path.dirname(jp), { recursive: true });
       await fsp.writeFile(jp, JSON.stringify(profile));
     }

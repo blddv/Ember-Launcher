@@ -26,6 +26,26 @@ function javaMajorOf(bin) {
   return Number(m[1]) === 1 ? Number(m[2]) : Number(m[1]);
 }
 
+// Уже скачанные среды из папки runtime версией не ниже требуемой.
+// Новая Minecraft запускается и на более новой Java, поэтому если нужную скачать
+// не удалось, лучше запустить игру на уже имеющейся среде, чем сорвать запуск.
+function findRuntime(minMajor) {
+  let names = [];
+  try { names = fs.readdirSync(dirs.runtime); } catch (_) { return null; }
+  const candidates = [];
+  for (const name of names) {
+    const m = /^java-(\d+)$/.exec(name);
+    if (!m) continue;
+    const major = Number(m[1]);
+    if (major < minMajor) continue;
+    const bin = javaExeIn(path.join(dirs.runtime, name));
+    if (!fs.existsSync(bin)) continue;
+    candidates.push({ bin, major });
+  }
+  candidates.sort((a, b) => a.major - b.major);
+  return candidates[0] || null;
+}
+
 // Возвращает путь к java-исполняемому файлу нужной major-версии.
 // Порядок: ручной путь из настроек -> уже скачанная среда -> скачивание Adoptium JRE.
 // Ручной путь используется, только если его версия не ниже требуемой: Minecraft с новой Java
@@ -46,7 +66,23 @@ async function ensureJava(major, report = () => {}) {
   const ext = os === 'windows' ? 'zip' : 'tar.gz';
   report({ stage: 'Java', text: `Скачиваю Java ${major} (Adoptium)…` });
   const url = `https://api.adoptium.net/v3/binary/latest/${major}/ga/${os}/${arch}/jre/hotspot/normal/eclipse`;
-  const buf = await fetchBuffer(url);
+  let buf;
+  try {
+    buf = await fetchBuffer(url);
+  } catch (e) {
+    // Сеть недоступна. Для новых версий Minecraft (1.17+) подойдёт и более новая Java —
+    // используем уже скачанную среду, чтобы запуск не срывался (часто заметно на 1.20.x,
+    // которым нужна Java 17, пока для других сборок кеш уже заполнен).
+    if (major >= 16) {
+      const fb = findRuntime(major);
+      if (fb) {
+        report({ stage: 'Java', text: `Java ${major} не скачалась, запускаю на Java ${fb.major}` });
+        return fb.bin;
+      }
+    }
+    throw new Error(`Не удалось скачать Java ${major} (Adoptium): ${e.message}. `
+      + 'Проверьте интернет или укажите путь к Java в Настройках');
+  }
 
   await fsp.mkdir(dirs.tmp, { recursive: true });
   const archive = path.join(dirs.tmp, `jre-${major}.${ext}`);

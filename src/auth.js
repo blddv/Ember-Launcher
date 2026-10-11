@@ -84,9 +84,29 @@ async function elyLogout(account) {
   }
 }
 
+// Уже скачанный authlib-injector: используется, если сервер меты недоступен
+function findCachedAuthlib() {
+  try {
+    const jars = fs.readdirSync(dirs.tools)
+      .filter(n => /^authlib-injector-.*\.jar$/i.test(n))
+      .sort();
+    return jars.length ? path.join(dirs.tools, jars[jars.length - 1]) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 // authlib-injector подменяет серверы авторизации клиента на Ely.by
 async function ensureAuthlibInjector() {
-  const meta = await fetchJson('https://authlib-injector.yushi.moe/artifact/latest.json');
+  let meta;
+  try {
+    meta = await fetchJson('https://authlib-injector.yushi.moe/artifact/latest.json');
+  } catch (e) {
+    // Сервер меты недоступен: берём уже скачанный jar, чтобы запуск не срывался
+    const cached = findCachedAuthlib();
+    if (cached) return cached;
+    throw new Error(`Не удалось скачать authlib-injector (Ely.by): ${e.message}. Проверьте интернет`);
+  }
   const jar = path.join(dirs.tools, `authlib-injector-${meta.version}.jar`);
   if (!fs.existsSync(jar)) {
     await fsp.mkdir(dirs.tools, { recursive: true });
