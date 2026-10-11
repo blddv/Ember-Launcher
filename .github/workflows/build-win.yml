@@ -36,7 +36,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          npm run dist 2>&1 | tee dist-log.txt
+          npx electron-builder --win --x64 --publish never 2>&1 | tee dist-log.txt
 
       - name: Report failure details
         if: failure()
