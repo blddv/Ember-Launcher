@@ -4,27 +4,104 @@ const path = require('path');
 const crypto = require('crypto');
 const https = require('https');
 const http = require('http');
+const { Transform } = require('stream');
 const { pipeline } = require('stream/promises');
 
 const UA = 'EMBER-Launcher/2.0.6 (https://github.com/ember-launcher)';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+const NET_CODES = [
+  'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'EAI_AGAIN',
+  'ENETUNREACH', 'ENOTFOUND', 'EHOSTUNREACH', 'ENETDOWN', 'EADDRNOTAVAIL',
+];
+
+function isConnectError(e) {
+  if (!e) return false;
+  // AggregateError из happy-eyeballs (Node 20+): не удалось подключиться ни к одному адресу
+  if (e.name === 'AggregateError') return true;
+  return NET_CODES.includes(e.code);
+}
+
+function isNetError(e) {
+  if (!e) return false;
+  if (e.name === 'AggregateError') return true;
+  const text = `${e.code || ''} ${e.message || ''}`;
+  return NET_CODES.some(c => text.includes(c))
+    || /socket hang up|premature close|other side closed|таймаут соединения/i.test(text);
+}
+
+// Человекочитаемая сводка сетевой ошибки: коды причин вместо пустого «AggregateError»
+function describeNetError(e) {
+  if (!e) return 'неизвестная ошибка';
+  if (e.name === 'AggregateError') {
+    const parts = (Array.isArray(e.errors) ? e.errors : [])
+      .map(x => x && (x.code || x.message))
+      .filter(Boolean);
+    return parts.length ? [...new Set(parts)].join(', ') : 'соединение не установлено';
+  }
+  // Таймауты показываем текстом, а не кодом — так понятнее
+  if (/таймаут/i.test(e.message || '')) return e.message;
+  return e.code || e.message || String(e);
+}
+
+function netError(e, url) {
+  if (e && e.netWrapped) return e; // не оборачиваем дважды
+  let host = url;
+  try { host = new URL(url).host; } catch (_) { /* url уже не URL */ }
+  const err = new Error(`Сетевая ошибка (${describeNetError(e)}) для ${host}`);
+  err.cause = e;
+  err.netWrapped = true;
+  return err;
+}
+
+// Последний рубеж перед IPC: чтобы в окне никогда не появлялось голое «AggregateError»
+function humanizeError(e) {
+  if (!e) return 'Неизвестная ошибка';
+  if (e.name === 'AggregateError') {
+    return `Сетевая ошибка (${describeNetError(e)}). Проверьте подключение к интернету`;
+  }
+  return e.message || String(e);
+}
+
 function request(url, opts = {}, redirects = 0) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const lib = u.protocol === 'http:' ? http : https;
+    const timeoutErr = why => Object.assign(new Error(`таймаут соединения (${why})`), { code: 'ETIMEDOUT' });
+    let guard;
+    let settled = false;
+    // Запрос завершается ровно один раз: поздние ошибки сокета не должны
+    // порождать «висящие» повторы, чей reject никто не ловит
+    const settle = fn => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(guard);
+      fn();
+    };
     const req = lib.request(u, {
       method: opts.method || 'GET',
       headers: { 'User-Agent': UA, ...(opts.headers || {}) },
+      family: opts.family,
     }, res => {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirects < 10) {
         res.resume();
-        return resolve(request(new URL(res.headers.location, url).toString(), opts, redirects + 1));
+        return settle(() => resolve(request(new URL(res.headers.location, url).toString(), opts, redirects + 1)));
       }
-      resolve(res);
+      settle(() => resolve(res));
     });
-    req.on('error', reject);
-    req.setTimeout(60000, () => req.destroy(new Error('таймаут соединения')));
+    // Страж на всё соединение: DNS, TCP, TLS и ожидание заголовков ответа.
+    // Без него запрос может зависнуть навсегда (например, чёрная дыра вместо ответа).
+    guard = setTimeout(() => req.destroy(timeoutErr('нет ответа')), opts.connectMs || 30000);
+    req.on('error', err => {
+      if (settled) return;
+      // Один повтор с принудительным IPv4: помогает при сломанном маршруте IPv6
+      if (!opts.family && isConnectError(err)) {
+        return settle(() => resolve(request(url, { ...opts, family: 4 }, redirects)));
+      }
+      settle(() => reject(netError(err, url)));
+    });
+    // Простой сокета без данных (зависшая загрузка) — тоже обрываем
+    req.setTimeout(opts.idleMs || 30000, () => req.destroy(timeoutErr('нет данных')));
     if (opts.body) req.write(opts.body);
     req.end();
   });
@@ -38,16 +115,36 @@ async function fetchBuffer(url, opts = {}) {
     headers['Content-Type'] = 'application/json';
   }
   const method = opts.method || (body ? 'POST' : 'GET');
-  const res = await request(url, { method, headers, body });
-  const chunks = [];
-  for await (const c of res) chunks.push(c);
-  const buf = Buffer.concat(chunks);
-  if (res.statusCode >= 400) {
-    const err = new Error(`HTTP ${res.statusCode}: ${extractError(buf)}`);
-    err.status = res.statusCode;
-    throw err;
+  const { attempts = 3, overallMs = 180000, connectMs, idleMs } = opts;
+  // Сетевые сбои (обрывы, таймауты) повторяем; ошибки HTTP (4xx/5xx) — нет
+  let lastErr;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await request(url, { method, headers, body, connectMs, idleMs });
+      const chunks = [];
+      // Общий предел времени на тело ответа: защита от «вечной» загрузки
+      const overall = setTimeout(() => res.destroy(Object.assign(new Error('таймаут загрузки'), { code: 'ETIMEDOUT' })), overallMs);
+      try {
+        for await (const c of res) chunks.push(c);
+      } finally {
+        clearTimeout(overall);
+      }
+      const buf = Buffer.concat(chunks);
+      if (res.statusCode >= 400) {
+        const err = new Error(`HTTP ${res.statusCode}: ${extractError(buf)}`);
+        err.status = res.statusCode;
+        throw err;
+      }
+      return buf;
+    } catch (e) {
+      lastErr = e;
+      if (!isNetError(e) || attempt === attempts) {
+        throw e.status ? e : (isNetError(e) ? netError(e, url) : e);
+      }
+      await sleep(700 * attempt);
+    }
   }
-  return buf;
+  throw lastErr;
 }
 
 function extractError(buf) {
@@ -75,21 +172,45 @@ function fileSha1(file) {
   });
 }
 
-async function downloadFile(url, dest, { sha1, headers } = {}) {
+async function downloadFile(url, dest, { sha1, headers, onProgress, attempts = 3, overallMs = 300000, connectMs, idleMs } = {}) {
   if (fs.existsSync(dest) && (!sha1 || (await fileSha1(dest)) === sha1)) return dest;
   await fsp.mkdir(path.dirname(dest), { recursive: true });
   const tmp = dest + '.part';
   let lastErr;
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      const res = await request(url, { headers });
-      if (res.statusCode >= 400) { res.resume(); throw new Error(`HTTP ${res.statusCode}`); }
-      await pipeline(res, fs.createWriteStream(tmp));
+      const res = await request(url, { headers, connectMs, idleMs });
+      if (res.statusCode >= 400) {
+        res.resume();
+        const err = new Error(`HTTP ${res.statusCode}`);
+        err.status = res.statusCode;
+        throw err;
+      }
+      const total = Number(res.headers['content-length']) || 0;
+      let received = 0;
+      const counter = onProgress && new Transform({
+        transform(chunk, _enc, cb) {
+          received += chunk.length;
+          onProgress(received, total);
+          cb(null, chunk);
+        },
+      });
+      // Общий предел времени на загрузку файла
+      const overall = setTimeout(() => res.destroy(Object.assign(new Error('таймаут загрузки'), { code: 'ETIMEDOUT' })), overallMs);
+      try {
+        if (counter) await pipeline(res, counter, fs.createWriteStream(tmp));
+        else await pipeline(res, fs.createWriteStream(tmp));
+      } finally {
+        clearTimeout(overall);
+      }
       if (sha1 && (await fileSha1(tmp)) !== sha1) throw new Error('контрольная сумма не совпала');
       await fsp.rename(tmp, dest);
       return dest;
     } catch (e) {
       lastErr = e;
+      // Повторяем сбои сети, битые суммы и 5xx; 4xx — нет, они не «починятся»
+      const retryable = isNetError(e) || e.message === 'контрольная сумма не совпала' || e.status >= 500;
+      if (!retryable || attempt === attempts) throw e;
       await sleep(700 * attempt);
     }
   }
@@ -109,4 +230,4 @@ async function pool(items, limit, worker) {
   return results;
 }
 
-module.exports = { fetchJson, fetchBuffer, downloadFile, fileSha1, pool, sleep, UA };
+module.exports = { fetchJson, fetchBuffer, downloadFile, fileSha1, pool, sleep, UA, humanizeError, describeNetError };

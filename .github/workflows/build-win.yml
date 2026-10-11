@@ -1,0 +1,71 @@
+name: Build Windows installer
+
+on:
+  push:
+    branches: [arena/8bde5889-ember-launcher]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Versions
+        shell: bash
+        run: |
+          node -v
+          npm -v
+          npx electron-builder --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build installer
+        id: build
+        shell: bash
+        run: |
+          set -o pipefail
+          npx electron-builder --win --x64 --publish never 2>&1 | tee dist-log.txt
+
+      - name: Report failure details
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "::error::$(tail -c 3500 dist-log.txt | tr '\n' ' | ')"
+          {
+            echo "## Build log tail"
+            echo '```'
+            tail -n 50 dist-log.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "CI: лог ошибки сборки $(date -u +%FT%TZ)" \
+            --body "$(tail -n 60 dist-log.txt)" || true
+
+      - name: Upload exe to release 2.0.6
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "2.0.6" "dist/EMBER Launcher Setup 2.0.6.exe" --clobber
+
+      # Запасной вариант: exe остаётся артефактом сборки, его можно скачать со страницы запуска
+      - name: Keep exe as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: EMBER-Launcher-Setup-2-0-6
+          path: dist/EMBER Launcher Setup 2.0.6.exe
+          if-no-files-found: ignore

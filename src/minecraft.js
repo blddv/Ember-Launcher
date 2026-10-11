@@ -15,7 +15,11 @@ const LAUNCHER_VERSION = require('../package.json').version;
 let manifestCache = null;
 async function getManifest() {
   if (!manifestCache || Date.now() - manifestCache.t > 10 * 60 * 1000) {
-    manifestCache = { t: Date.now(), data: await fetchJson(MANIFEST_URL) };
+    try {
+      manifestCache = { t: Date.now(), data: await fetchJson(MANIFEST_URL) };
+    } catch (e) {
+      throw new Error(`Не удалось загрузить список версий Minecraft: ${e.message}`);
+    }
   }
   return manifestCache.data;
 }
@@ -131,7 +135,11 @@ async function installVersion(id, report = () => {}) {
     const manifest = await getManifest();
     const entry = manifest.versions.find(v => v.id === id);
     if (!entry) throw new Error(`Версия ${id} не найдена в манифесте Mojang`);
-    json = await fetchJson(entry.url);
+    try {
+      json = await fetchJson(entry.url);
+    } catch (e) {
+      throw new Error(`Не удалось загрузить описание версии ${id}: ${e.message}`);
+    }
     await fsp.mkdir(vdir, { recursive: true });
     await fsp.writeFile(jsonPath, JSON.stringify(json));
   }
