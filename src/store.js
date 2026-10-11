@@ -26,6 +26,10 @@ const DEFAULTS = {
   // Сборки
   selectedInstance: null,
   instances: [],            // { id, name, version, loader, loaderVersion, createdAt, playMs, lastPlayed }
+  // EMBER Raft: мод с режимом выживания на плоту (как Raft). По умолчанию выключен.
+  emberRaft: {
+    enabled: false,
+  },
   // Производительность: пресет применяется при каждом запуске сборки
   perf: {
     preset: 'standard',     // standard | optimized | potato
@@ -82,6 +86,7 @@ function load() {
     ...clone(DEFAULTS),
     ...raw,
     orangeVisuals: { ...DEFAULTS.orangeVisuals, ...(raw.orangeVisuals || {}) },
+    emberRaft: { ...DEFAULTS.emberRaft, ...(raw.emberRaft || {}) },
     perf: { ...DEFAULTS.perf, ...(raw.perf || {}) },
   };
   // Старые поля плеера лаунчера (music.folder) переносим в Orange Visuals
@@ -108,11 +113,11 @@ function set(key, value) {
   return data[key];
 }
 
-// Частичное обновление. Вложенные блоки (orangeVisuals, perf) сливаются, а не заменяются.
+// Частичное обновление. Вложенные блоки (orangeVisuals, emberRaft, perf) сливаются, а не заменяются.
 function patch(obj) {
   load();
   for (const [k, v] of Object.entries(obj || {})) {
-    if (k === 'orangeVisuals' || k === 'perf') data[k] = { ...data[k], ...v };
+    if (k === 'orangeVisuals' || k === 'perf' || k === 'emberRaft') data[k] = { ...data[k], ...v };
     else data[k] = v;
   }
   save();

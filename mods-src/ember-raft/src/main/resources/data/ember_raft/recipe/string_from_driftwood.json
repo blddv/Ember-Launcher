@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    { "item": "ember_raft:driftwood" },
+    { "item": "ember_raft:driftwood" }
+  ],
+  "result": {
+    "id": "minecraft:string",
+    "count": 1
+  }
+}

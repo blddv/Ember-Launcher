@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "PPP",
+    "LLL"
+  ],
+  "key": {
+    "P": { "tag": "minecraft:planks" },
+    "L": { "tag": "minecraft:logs" }
+  },
+  "result": {
+    "id": "ember_raft:raft",
+    "count": 1
+  }
+}

@@ -255,6 +255,15 @@ function viewHome() {
   else if (state.mod && state.mod.reason) modChip = `<span class="chip off"><span class="dot"></span>Orange Visuals: ${esc(state.mod.reason)}</span>`;
   else modChip = '<span class="chip"><span class="dot"></span>Orange Visuals включится при запуске</span>';
 
+  // EMBER Raft показываем на главной только если мод включён в настройках
+  const er = state.settings.emberRaft || { enabled: false };
+  let raftChip = '';
+  if (er.enabled) {
+    if (state.raft && state.raft.active) raftChip = '<span class="chip ok"><span class="dot"></span>EMBER Raft активен</span>';
+    else if (state.raft && state.raft.reason) raftChip = `<span class="chip off"><span class="dot"></span>EMBER Raft: ${esc(state.raft.reason)}</span>`;
+    else raftChip = '<span class="chip"><span class="dot"></span>EMBER Raft включится при запуске</span>';
+  }
+
   const accChip = state.account
     ? `<span class="chip ok"><span class="dot"></span>${esc(state.account.username)} · ${state.account.type === 'elyby' ? 'Ely.by' : 'оффлайн'}</span>`
     : '<span class="chip off"><span class="dot"></span>Аккаунт не выбран</span>';
@@ -276,7 +285,7 @@ function viewHome() {
       <div class="kicker">${state.running ? 'ИГРА ЗАПУЩЕНА' : 'ГОТОВ К ИГРЕ'}</div>
       <h1>${inst ? esc(inst.name) : 'Создайте первую сборку'}</h1>
       <p>${inst ? `Minecraft ${esc(inst.version)} · ${esc(loaderName(inst))}` : 'Во вкладке «Сборки» создайте версию Minecraft или установите сборку из «Моды и сборки».'}</p>
-      <div class="chips">${accChip}${modChip}${perfChip}</div>
+      <div class="chips">${accChip}${modChip}${raftChip}${perfChip}</div>
       ${warn}
       <div id="home-progress">${progressHTML(state.progress)}</div>
       <div class="play-row">
@@ -1129,6 +1138,11 @@ function viewSettings() {
         </div>
       </div>
       <div class="card span-2">
+        <h3>EMBER Raft <small>собственный мод EMBER · режим выживания на плоту · Minecraft 1.21.1 Fabric</small></h3>
+        <div class="hint" style="margin-bottom:10px">Как в игре Raft: в новом мире вы появляетесь на плоту посреди океана. Крюком с верёвкой вытягивайте проплывающую древесину, улучшайте плот досками, а течение пригонит плот к островам — припасы на берегу подбираются только ПКМ. Исходники мода — в mods-src/ember-raft.</div>
+        ${sw('raft-enabled', 'Включить мод', 'Ставится в сборку при запуске. Выключено — удаляется из сборок', (s.emberRaft || {}).enabled)}
+      </div>
+      <div class="card span-2">
         <h3>Папка данных <small>сборки, моды, миры, Java и библиотеки</small></h3>
         <div class="hint" style="margin-bottom:10px">${state.info && state.info.isCustom ? 'Выбрана своя папка.' : 'Стандартная папка лаунчера.'} Изменение перенесёт данные и перезапустит лаунчер.</div>
         <div class="row">
@@ -1212,6 +1226,9 @@ async function saveSettings() {
     perf: {
       preset: currentPreset(),
       installMods: $('#perf-mods').checked,
+    },
+    emberRaft: {
+      enabled: $('#raft-enabled').checked,
     },
     orangeVisuals: {
       enabled: $('#ov-enabled').checked,
@@ -1353,6 +1370,10 @@ function setupEvents() {
   });
   window.ember.on('mod:status', m => {
     state.mod = m;
+    if (state.view === 'home') renderView();
+  });
+  window.ember.on('raft:status', m => {
+    state.raft = m;
     if (state.view === 'home') renderView();
   });
 }

@@ -152,6 +152,9 @@ async function launchFlow(instanceId) {
     const modState = await mods.syncOrangeVisuals(inst, report).catch(e => ({ active: false, reason: e.message }));
     send('mod:status', { active: !!modState.active, reason: modState.reason || '' });
 
+    const raftState = await mods.syncEmberRaft(inst, report).catch(e => ({ active: false, reason: e.message }));
+    send('raft:status', { active: !!raftState.active, reason: raftState.reason || '' });
+
     // Пресет производительности: options.txt, моды-оптимизаторы, JVM и память
     const tuning = await perf.prepareLaunch(inst, s.perf.preset, s.ram || 4096, s.perf.installMods, report);
 
