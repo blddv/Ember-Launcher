@@ -2,7 +2,7 @@ name: Build Windows installer
 
 on:
   push:
-    branches: [arena/8bde5889-ember-launcher]
+    branches: [arena/fe796923-ember-launcher]
   workflow_dispatch:
 
 permissions:
@@ -27,6 +27,16 @@ jobs:
           node -v
           npm -v
           npx electron-builder --version
+
+      # Имя установщика и тег релиза берём из package.json, чтобы не править workflow на каждую версию
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "exe=EMBER Launcher Setup $VER.exe" >> "$GITHUB_OUTPUT"
+          echo "Собираем версию $VER"
 
       - name: Install dependencies
         run: npm ci
@@ -55,17 +65,24 @@ jobs:
             --title "CI: лог ошибки сборки $(date -u +%FT%TZ)" \
             --body "$(tail -n 60 dist-log.txt)" || true
 
-      - name: Upload exe to release 2.0.6
+      - name: Upload exe to release ${{ steps.ver.outputs.version }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "2.0.6" "dist/EMBER Launcher Setup 2.0.6.exe" --clobber
+        run: |
+          VER="${{ steps.ver.outputs.version }}"
+          EXE="dist/${{ steps.ver.outputs.exe }}"
+          # Релиз создаётся заранее; если его нет — создаём из этого коммита
+          gh release view "$VER" >/dev/null 2>&1 || \
+            gh release create "$VER" --target "$GITHUB_SHA" --title "Ember launcher $VER" \
+              --notes "Установщик Windows: EMBER Launcher Setup $VER.exe"
+          gh release upload "$VER" "$EXE" --clobber
 
       # Запасной вариант: exe остаётся артефактом сборки, его можно скачать со страницы запуска
       - name: Keep exe as workflow artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: EMBER-Launcher-Setup-2-0-6
-          path: dist/EMBER Launcher Setup 2.0.6.exe
+          name: EMBER-Launcher-Setup-${{ steps.ver.outputs.version }}
+          path: dist/${{ steps.ver.outputs.exe }}
           if-no-files-found: ignore

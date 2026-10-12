@@ -105,26 +105,79 @@ async function installModrinthFiles(inst, projectId, kind, opts = {}) {
   return files.map(x => x.label);
 }
 
-async function installMrpack(file, nameFallback) {
-  const zip = new AdmZip(file);
-  const index = JSON.parse(zip.readAsText('modrinth.index.json'));
+// Устанавливает сборку Modrinth (.mrpack) и возвращает { instance, note }.
+// Архив может быть любым: из Modrinth, по ссылке или файлом с диска.
+// Файлы, которые Modrinth не отдаёт на скачивание (пустой массив downloads), и серверные
+// файлы не роняют установку: они пропускаются и перечисляются в note. То же с битыми ссылками —
+// сборка всё равно создаётся, а пользователь видит, чего не хватает.
+async function installMrpack(file, nameFallback, opts = {}) {
+  const report = opts.report || (() => {});
+  let zip;
+  try {
+    zip = new AdmZip(file);
+  } catch (e) {
+    throw new Error(`Не удалось открыть архив: ${e.message}`);
+  }
+  if (!zip.getEntry('modrinth.index.json')) {
+    throw new Error('Это не сборка Modrinth (.mrpack): в архиве нет modrinth.index.json');
+  }
+  let index;
+  try {
+    index = JSON.parse(zip.readAsText('modrinth.index.json'));
+  } catch (_) {
+    throw new Error('В сборке повреждён modrinth.index.json');
+  }
   const deps = index.dependencies || {};
   const mc = deps.minecraft;
+  if (!mc) throw new Error('В сборке не указана версия Minecraft (dependencies.minecraft)');
   let loader = 'vanilla';
   let loaderVersion = '';
   const map = [['fabric-loader', 'fabric'], ['quilt-loader', 'quilt'], ['forge', 'forge'], ['neoforge', 'neoforge']];
   for (const [key, name] of map) {
     if (deps[key]) { loader = name; loaderVersion = deps[key]; break; }
   }
-  const inst = instances.create({ name: index.name || nameFallback, version: mc, loader, loaderVersion });
-  const dir = instances.getGameDir(inst);
-  const files = index.files.filter(f => !(f.env && f.env.client === 'unsupported'));
-  await pool(files, 6, f => {
-    const dest = safeJoin(dir, f.path);
-    return downloadFile(f.downloads[0], dest, { sha1: f.hashes && f.hashes.sha1 });
-  });
-  extractOverrides(zip, dir, ['overrides/', 'client-overrides/']);
-  return inst;
+  const inst = instances.create({ name: index.name || nameFallback || 'Сборка Modrinth', version: mc, loader, loaderVersion });
+  try {
+    const dir = instances.getGameDir(inst);
+    const wanted = [];
+    const noLink = [];
+    for (const f of index.files || []) {
+      // Серверные файлы клиенту не нужны
+      if (f.env && f.env.client === 'unsupported') continue;
+      const url = (f.downloads || []).find(x => typeof x === 'string' && /^https?:\/\//i.test(x));
+      if (!url || !f.path) { noLink.push(f.path || 'файл без имени'); continue; }
+      wanted.push({ path: f.path, url, sha1: f.hashes && f.hashes.sha1 });
+    }
+
+    let done = 0;
+    const failed = [];
+    report({ stage: 'Сборка', text: `Файлы: 0 из ${wanted.length}`, done: 0, total: wanted.length });
+    await pool(wanted, 6, async f => {
+      try {
+        await downloadFile(f.url, safeJoin(dir, f.path), { sha1: f.sha1 });
+      } catch (e) {
+        failed.push(`${f.path} — ${e.message}`);
+      } finally {
+        done++;
+        report({ stage: 'Сборка', text: `Файлы: ${done} из ${wanted.length}`, done, total: wanted.length });
+      }
+    });
+    extractOverrides(zip, dir, ['overrides/', 'client-overrides/']);
+
+    const notes = [];
+    if (noLink.length) {
+      notes.push(`${noLink.length} файл(ов) пропущено: Modrinth не даёт на них прямую ссылку` +
+        (noLink.length <= 3 ? ` (${noLink.join(', ')})` : ''));
+    }
+    if (failed.length) {
+      notes.push(`${failed.length} файл(ов) не скачалось: ${failed.slice(0, 3).join('; ')}`);
+    }
+    return { instance: inst, note: notes.join('. ') };
+  } catch (e) {
+    // Если распаковка сорвалась, пустая сборка в списке не нужна
+    try { instances.remove(inst.id); } catch (_) { /* сборки могло уже не быть */ }
+    throw e;
+  }
 }
 
 function extractOverrides(zip, dir, prefixes) {
@@ -139,13 +192,23 @@ function extractOverrides(zip, dir, prefixes) {
   }
 }
 
-async function installModrinthModpack(projectId) {
+// Сборка из Modrinth: качаем .mrpack во временную папку и разворачиваем его в новую сборку
+async function installModrinthModpack(projectId, opts = {}) {
+  const report = opts.report || (() => {});
   const v = await mrPickVersion(projectId, null, null);
   if (!v) throw new Error('У сборки нет доступных версий');
   const f = v.files.find(x => x.primary) || v.files[0];
+  if (!f || !f.url) throw new Error('У версии сборки нет файла .mrpack');
+  await fsp.mkdir(dirs.tmp, { recursive: true });
   const dest = path.join(dirs.tmp, `${v.id}.mrpack`);
+  report({ stage: 'Сборка', text: 'Скачиваю .mrpack…' });
   await downloadFile(f.url, dest);
-  return installMrpack(dest, v.name);
+  try {
+    return await installMrpack(dest, v.name || v.project_id, { report });
+  } finally {
+    // Архив больше не нужен: не копим сотни мегабайт в папке данных
+    await fsp.rm(dest, { force: true }).catch(() => {});
+  }
 }
 
 /* ================= CURSEFORGE ================= */
@@ -375,17 +438,23 @@ async function installGithub(inst, item) {
 
 /* ================= ПО ССЫЛКЕ (любой сайт) ================= */
 
-async function installLink(url, inst) {
+async function installLink(url, inst, opts = {}) {
   let u;
   try { u = new URL(url); } catch (_) { throw new Error('Некорректная ссылка'); }
   if (!/^https?:$/.test(u.protocol)) throw new Error('Нужна ссылка http или https');
   const name = safeName(decodeURIComponent(path.basename(u.pathname)) || 'download');
   const ext = path.extname(name).toLowerCase();
 
+  // Сборка Modrinth по прямой ссылке: создаёт новую сборку, существующая не нужна
   if (ext === '.mrpack') {
-    const tmp = path.join(dirs.tmp, name);
+    await fsp.mkdir(dirs.tmp, { recursive: true });
+    const tmp = path.join(dirs.tmp, `${Date.now()}-${name}`);
     await downloadFile(url, tmp);
-    return { instance: await installMrpack(tmp, name.replace(/\.mrpack$/i, '')) };
+    try {
+      return await installMrpack(tmp, name.replace(/\.mrpack$/i, ''), opts);
+    } finally {
+      await fsp.rm(tmp, { force: true }).catch(() => {});
+    }
   }
   if (!inst) throw new Error('Выберите сборку, в которую ставить файл');
   let folder;
@@ -493,8 +562,9 @@ async function updateModrinth(instance, item) {
 }
 
 async function install(item, instance, opts = {}) {
+  const report = opts.report || (() => {});
   if (item.source === 'modrinth') {
-    if (item.kind === 'modpack') return { instance: await installModrinthModpack(item.id) };
+    if (item.kind === 'modpack') return installModrinthModpack(item.id, { report });
     await guardDuplicate(instance, item, opts);
     if (opts.update) return updateModrinth(instance, item);
     return { installed: await installModrinthFiles(instance, item.id, item.kind) };
@@ -509,8 +579,18 @@ async function install(item, instance, opts = {}) {
   }
   if (item.source === 'smithed') return installSmithed(instance, item);
   if (item.source === 'github') return installGithub(instance, item);
-  if (item.source === 'link') return installLink(item.id, instance);
+  if (item.source === 'link') return installLink(item.id, instance, { report });
   throw new Error('Неизвестный источник');
 }
 
-module.exports = { search, install, installStates, installMrpack, installModrinthFiles, FABRIC_API_ID, safeJoin, label };
+// Установка сборки Modrinth из локального файла .mrpack (диалог или перетаскивание в окно).
+// Путь берётся как есть: архив только читается, копировать его во временную папку не нужно.
+async function installMrpackFile(file, opts = {}) {
+  const report = opts.report || (() => {});
+  if (!/\.(mrpack|zip)$/i.test(file)) throw new Error('Нужен файл сборки Modrinth с расширением .mrpack');
+  if (!fs.existsSync(file)) throw new Error(`Файл не найден: ${file}`);
+  const res = await installMrpack(file, path.basename(file).replace(/\.(mrpack|zip)$/i, ''), { report });
+  return { ...res.instance, note: res.note };
+}
+
+module.exports = { search, install, installStates, installMrpack, installMrpackFile, installModrinthFiles, FABRIC_API_ID, safeJoin, label };
