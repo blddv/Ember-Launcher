@@ -32,6 +32,39 @@ function send(channel, payload) {
 }
 const report = p => send('progress', p);
 
+// Импорт сборки из файла: .mrpack (Modrinth) или .zip (экспорт EMBER).
+// Один разбор на диалог выбора файла и на перетаскивание в окно.
+// Сборку Modrinth иногда переименовывают в .zip, поэтому расширению не верим:
+// решаем по содержимому архива
+function isMrpack(file) {
+  try {
+    const zip = new AdmZip(file);
+    return !!(zip.getEntry('modrinth.index.json') || zip.getEntry('modrinth/index.json'));
+  } catch (_) {
+    return false;
+  }
+}
+
+async function importInstanceFile(file) {
+  if (!file) throw new Error('Файл не выбран');
+  if (!/\.(mrpack|zip)$/i.test(file)) {
+    throw new Error('Нужен файл сборки: .mrpack (Modrinth) или .zip (экспорт EMBER)');
+  }
+  if (/\.mrpack$/i.test(file) || isMrpack(file)) {
+    report({ stage: 'Сборка', text: 'Устанавливаю .mrpack…' });
+    try {
+      const res = await providers.installMrpackFile(file, { report });
+      store.set('selectedInstance', res.id);
+      report({ stage: 'Готово', text: 'Сборка установлена' });
+      return res;
+    } catch (e) {
+      report({ stage: 'Ошибка', text: e.message });
+      throw e;
+    }
+  }
+  return instances.importZip(file);
+}
+
 // Обложка: файл с диска или картинка по https-ссылке (например, иконка с Modrinth)
 async function applyCover(id, cover) {
   if (cover.file) return instances.setCover(id, cover.file);
@@ -380,11 +413,15 @@ function bootstrap() {
     const r = await dialog.showOpenDialog(win, {
       title: 'Импорт сборки',
       properties: ['openFile'],
-      filters: [{ name: 'Сборка EMBER (zip)', extensions: ['zip'] }],
+      // .mrpack — сборка Modrinth, .zip — экспорт из EMBER
+      filters: [{ name: 'Сборка (.mrpack или .zip)', extensions: ['mrpack', 'zip'] }],
     });
     if (r.canceled || !r.filePaths[0]) return { cancelled: true };
-    return instances.importZip(r.filePaths[0]);
+    return importInstanceFile(r.filePaths[0]);
   });
+
+  // Файл, перетащенный в окно: .mrpack разворачивается как сборка Modrinth, .zip — как экспорт EMBER
+  ipcMain.handle('instances:importPath', (_e, file) => importInstanceFile(String(file || '')));
   ipcMain.handle('instances:backup', (_e, id) => backupSaves(instances.find(id)));
   ipcMain.handle('instances:folder', (_e, { id, sub }) => {
     const inst = instances.find(id);
@@ -456,8 +493,14 @@ function bootstrap() {
     }
     if (!noInstance && !inst) throw new Error('Выберите сборку, в которую ставить мод');
     report({ stage: 'Загрузка', text: `Устанавливаю ${item.title || item.id}…` });
-    const res = await providers.install(item, inst, { update: !!update });
-    if (res.instance) store.set('selectedInstance', res.instance.id);
+    const res = await providers.install(item, inst, { update: !!update, report });
+    if (res.instance) {
+      store.set('selectedInstance', res.instance.id);
+      // Обложкой новой сборки Modrinth становится иконка проекта
+      if (item.icon && /^https:\/\//i.test(item.icon)) {
+        try { res.instance = await applyCover(res.instance.id, { url: item.icon }); } catch (_) { /* обложка не обязательна */ }
+      }
+    }
     report({ stage: 'Готово', text: 'Установка завершена' });
     return res;
   });

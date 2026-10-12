@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('ember', {
     duplicate: id => inv('instances:duplicate', id),
     exportZip: id => inv('instances:exportZip', id),
     importZip: () => inv('instances:importZip'),
+    importPath: p => inv('instances:importPath', p),
     backup: id => inv('instances:backup', id),
     folder: (id, sub) => inv('instances:folder', { id, sub }),
     setCover: (id, cover) => inv('instances:setCover', { id, cover }),

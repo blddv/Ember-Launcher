@@ -301,7 +301,7 @@ function viewHome() {
           <button class="btn" data-nav-go="instances">${icon('plus')} Новая сборка</button>
           <button class="btn" data-nav-go="mods">${icon('puzzle')} Найти мод</button>
           <button class="btn" data-nav-go="screens">${icon('image')} Скриншоты</button>
-          <button class="btn" data-act="import-zip">${icon('upload')} Импорт сборки</button>
+          <button class="btn" data-act="import-zip">${icon('upload')} Импорт сборки (.mrpack / .zip)</button>
         </div>
       </div>
       <div class="card">
@@ -320,7 +320,7 @@ function viewInstances() {
       <div><h1 class="page-title">Сборки</h1>
       <p class="page-sub" style="margin-bottom:0">Отдельная папка на каждую сборку: свои моды, миры и настройки.</p></div>
       <div class="row">
-        <button class="btn" data-act="import-zip">${icon('upload')} Импорт .zip</button>
+        <button class="btn" data-act="import-zip" title="Сборка Modrinth (.mrpack) или экспорт EMBER (.zip)">${icon('upload')} Импорт сборки</button>
         <button class="btn primary" data-act="new-inst">${icon('plus')} Новая сборка</button>
       </div>
     </div>
@@ -550,7 +550,7 @@ function paletteItems() {
     { label: 'Играть (выбранная сборка)', hint: 'Запуск', run: () => launch() },
     { label: state.running ? 'Остановить игру' : 'Остановить игру (сейчас не запущена)', run: () => window.ember.game.stop() },
     { label: 'Новая сборка', run: () => openNewInstance() },
-    { label: 'Импорт сборки из .zip', run: () => importZip() },
+    { label: 'Импорт сборки (.mrpack или .zip)', run: () => importZip() },
     { label: 'Оптимизация: применить пресет к выбранной сборке', run: () => applyPerf() },
     { label: 'Поиск модов', run: () => setView('mods') },
     ...nav,
@@ -750,6 +750,15 @@ function linkPanel() {
         <input class="input grow" id="link-url" placeholder="https://example.com/mod-1.0.jar">
         <button class="btn primary" data-act="install-link">${icon('download')} Установить</button>
       </div>
+      <div class="hint" style="margin-top:10px">Прямая ссылка на .jar (мод), .zip (ресурспак) или .mrpack (сборка Modrinth).</div>
+    </div>
+    <div class="card">
+      <h3>Установить сборку из файла</h3>
+      <p class="hint" style="margin-bottom:14px">Файл <b>.mrpack</b> с Modrinth или с любого сайта: развернётся в новую сборку с нужной версией Minecraft и загрузчиком. Можно просто перетащить файл в окно лаунчера.</p>
+      <div class="row">
+        <button class="btn primary" data-act="import-zip">${icon('upload')} Выбрать .mrpack</button>
+        <span class="hint">Ещё принимается .zip — экспорт сборки из EMBER</span>
+      </div>
     </div>`;
 }
 
@@ -921,6 +930,7 @@ async function installItem(idx) {
     const res = await window.ember.install(it, inst && inst.id, { update });
     if (res.instance) {
       toast(`Создана сборка «${res.instance.name}» и выбрана`, 'ok');
+      if (res.note) toast(res.note, 'err');
     } else if (res.note) {
       toast(res.note, 'ok');
     } else if (update) {
@@ -1303,10 +1313,30 @@ async function launch() {
   }
 }
 
+// Импорт из файла: диалогом или перетаскиванием .mrpack / .zip в окно
+async function importInstanceFile(file) {
+  if (!file) return importZip();
+  state.progress = { stage: 'Сборка', text: file.split(/[\\/]/).pop() };
+  renderBusy();
+  try {
+    const inst = await window.ember.instances.importPath(file);
+    if (!inst || inst.cancelled) return;
+    toast(`Сборка «${inst.name}» установлена`, 'ok');
+    if (inst.note) toast(inst.note, 'err');
+    await reloadInstances();
+  } catch (e) {
+    toast(e.message, 'err');
+  } finally {
+    state.progress = null;
+    renderBusy();
+  }
+}
+
 function importZip() {
   return window.ember.instances.importZip().then(async inst => {
     if (!inst || inst.cancelled) return;
-    toast(`Сборка «${inst.name}» импортирована`, 'ok');
+    toast(`Сборка «${inst.name}» установлена`, 'ok');
+    if (inst.note) toast(inst.note, 'err');
     await reloadInstances();
   }).catch(e => toast(e.message, 'err'));
 }
@@ -1326,6 +1356,17 @@ async function openModsManager(id) {
 }
 
 function setupEvents() {
+  // Файл сборки (.mrpack или .zip), перетащенный в окно: без этого Electron
+  // пытается открыть файл как страницу и уводит интерфейс в чёрный экран
+  const cancelDrag = e => { e.preventDefault(); e.stopPropagation(); };
+  window.addEventListener('dragover', cancelDrag);
+  window.addEventListener('dragenter', cancelDrag);
+  window.addEventListener('drop', e => {
+    cancelDrag(e);
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (file && file.path && /\.(mrpack|zip)$/i.test(file.path)) importInstanceFile(file.path);
+  });
+
   window.ember.on('progress', p => {
     state.progress = p;
     renderBusy();
@@ -1569,6 +1610,7 @@ document.addEventListener('click', async e => {
           const res = await window.ember.install({ source: 'link', kind: 'link', id: url, title: url }, inst && inst.id);
           if (res.instance) toast(`Создана сборка «${res.instance.name}» и выбрана`, 'ok');
           else toast(`Скачано: ${(res.installed || []).join(', ')}`, 'ok');
+          if (res.note) toast(res.note, 'err');
           await reloadInstances();
         } catch (err) {
           toast(err.message, 'err');
