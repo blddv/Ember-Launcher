@@ -233,7 +233,7 @@ function renderSidebarFoot() {
       <div class="avatar">${initial}</div>
       <div class="who">
         <b>${a ? esc(a.username) : 'Не выбран'}</b>
-        <span>${a ? (a.type === 'elyby' ? 'Ely.by' : 'Оффлайн') : 'Войдите во вкладке «Аккаунт»'}</span>
+        <span>${a ? accTypeLabel(a.type) : 'Войдите во вкладке «Аккаунт»'}</span>
       </div>
     </div>
     <div class="ver-foot">Minecraft · Fabric · Quilt · Forge · NeoForge · Rust</div>`;
@@ -297,7 +297,7 @@ function viewHome() {
   const accChip = rust
     ? '<span class="chip ok"><span class="dot"></span>Аккаунт Java не нужен</span>'
     : state.account
-      ? `<span class="chip ok"><span class="dot"></span>${esc(state.account.username)} · ${state.account.type === 'elyby' ? 'Ely.by' : 'оффлайн'}</span>`
+      ? `<span class="chip ok"><span class="dot"></span>${esc(state.account.username)} · ${accTypeLabel(state.account.type)}</span>`
       : '<span class="chip off"><span class="dot"></span>Аккаунт не выбран</span>';
 
   const perfChip = `<span class="chip ${perf.preset === 'standard' ? '' : 'ok'}"><span class="dot"></span>Пресет: ${esc(PERF_LABEL[perf.preset] || perf.preset)}</span>`;
@@ -349,7 +349,7 @@ function viewHome() {
       </div>
       <div class="card">
         <h3>Быстрый старт</h3>
-        <div class="hint">1) «Аккаунт» — войдите через Ely.by или играйте оффлайн. 2) «Сборки» — создайте сборку с нужным загрузчиком и обложкой. 3) «Настройки» — выберите пресет «Очень оптимизировано» для слабого ПК. Minecraft на Rust — отдельная вкладка: там движки Horizon и Rustcraft и их моды. Ctrl+K открывает командную палитру. В игре клавиша меню (по умолчанию R Shift) открывает меню Orange Visuals.</div>
+        <div class="hint">1) «Аккаунт» — войдите через Microsoft или Ely.by, либо играйте оффлайн. 2) «Сборки» — создайте сборку с нужным загрузчиком и обложкой. 3) «Настройки» — выберите пресет «Очень оптимизировано» для слабого ПК. Minecraft на Rust — отдельная вкладка: там движки Horizon и Rustcraft и их моды. Ctrl+K открывает командную палитру. В игре клавиша меню (по умолчанию R Shift) открывает меню Orange Visuals.</div>
       </div>
     </div>`;
 }
@@ -1220,6 +1220,16 @@ async function loadScreens() {
 
 /* ================= Аккаунт ================= */
 
+function accTypeLabel(type) {
+  return type === 'elyby' ? 'Ely.by' : type === 'microsoft' ? 'Microsoft' : 'Оффлайн';
+}
+
+function accTypeHint(a) {
+  if (a.type === 'elyby') return '<span class="badge-ely">ELY.BY</span> &nbsp;аккаунт Ely.by, скин подтягивается автоматически';
+  if (a.type === 'microsoft') return '<span class="badge-ely" style="background:rgba(0,120,212,.18);color:#8FCBFF">MICROSOFT</span> &nbsp;официальный аккаунт Minecraft, скин и ник из профиля';
+  return 'Оффлайн-режим: без пароля. Подходит только для серверов, которые не проверяют аккаунты';
+}
+
 function viewAccount() {
   const a = state.account;
   const current = a
@@ -1228,7 +1238,7 @@ function viewAccount() {
           <div class="big-avatar">${esc(a.username[0].toUpperCase())}</div>
           <div class="grow">
             <div style="font-size:18px;font-weight:900">${esc(a.username)}</div>
-            <div class="hint">${a.type === 'elyby' ? '<span class="badge-ely">ELY.BY</span> &nbsp;аккаунт Ely.by, скин подтягивается автоматически' : 'Оффлайн-режим: без пароля. Подходит только для серверов, которые не проверяют аккаунты'}</div>
+            <div class="hint">${accTypeHint(a)}</div>
             <div class="hint mono" style="margin-top:4px;font-size:11px">UUID ${esc(a.uuid)}</div>
           </div>
           <button class="btn danger" data-act="logout">${icon('logout')} Выйти</button>
@@ -1236,11 +1246,30 @@ function viewAccount() {
       </div>`
     : '';
 
+  const msBody = state.ms
+    ? `<div class="ms-code" style="margin-top:12px;padding:14px;border:1px solid var(--navy-600);border-radius:12px;background:rgba(0,120,212,.06)">
+        <div class="hint">Откройте <b>microsoft.com/link</b> на телефоне или компьютере и введите код:</div>
+        <div style="font-size:26px;font-weight:900;letter-spacing:.15em;margin:10px 0;color:#8FCBFF">${esc(state.ms.userCode)}</div>
+        <div class="row">
+          <button class="btn primary" data-act="ms-open-link">Открыть страницу</button>
+          <button class="btn" data-act="ms-copy">Копировать код</button>
+          <button class="btn danger" data-act="ms-cancel">Отмена</button>
+        </div>
+        <div class="hint" style="margin-top:10px">Жду подтверждения в браузере…</div>
+      </div>`
+    : `<div class="hint" style="margin-top:12px">Вход по коду: лаунчер покажет код, вы вводите его на microsoft.com/link. Пароль в приложение вводить не нужно. Работают аккаунты Microsoft с купленной Minecraft (в том числе Game Pass).</div>
+      <div class="row" style="margin-top:12px"><button class="btn primary" data-act="ms-login">Войти через Microsoft</button></div>`;
+
   return `
     <h1 class="page-title">Аккаунт</h1>
-    <p class="page-sub">Войдите через Ely.by (скины и ник) или играйте оффлайн.</p>
+    <p class="page-sub">Войдите через Microsoft (официальный аккаунт), Ely.by (скины и ник) или играйте оффлайн.</p>
     ${current}
     <div class="acc-grid">
+      <div class="card">
+        <div class="acc-head"><div class="big-avatar" style="font-size:20px">M</div>
+          <div><h3 style="margin:0">Microsoft</h3><div class="hint">Официальный аккаунт Minecraft</div></div></div>
+        ${msBody}
+      </div>
       <div class="card">
         <div class="acc-head"><div class="big-avatar" style="font-size:20px">E</div>
           <div><h3 style="margin:0">Ely.by</h3><div class="hint">Скины и ник Ely.by работают в игре</div></div></div>
@@ -1257,7 +1286,7 @@ function viewAccount() {
           <div><h3 style="margin:0">Оффлайн</h3><div class="hint">Быстрый вход без пароля</div></div></div>
         <div class="field"><label>Ник</label><input class="input" id="off-name" placeholder="Steve_01" maxlength="16"></div>
         <div class="row"><button class="btn primary" data-act="offline-login">Играть оффлайн</button></div>
-        <div class="hint" style="margin-top:12px">Ник от 3 до 16 символов: латиница, цифры и «_». Ely.by-скин в оффлайне не работает.</div>
+        <div class="hint" style="margin-top:12px">Ник от 3 до 16 символов: латиница, цифры и «_». Скины в оффлайне не работают.</div>
       </div>
     </div>`;
 }
@@ -1946,6 +1975,41 @@ document.addEventListener('click', async e => {
         state.account = null;
         toast('Вы вышли из аккаунта');
         renderSidebarFoot();
+        return renderView();
+      }
+
+      case 'ms-login': {
+        if (state.ms) return;
+        t.disabled = true;
+        try {
+          state.ms = await window.ember.auth.msStart();
+          renderView();
+          const acc = await window.ember.auth.msWait();
+          state.ms = null;
+          state.account = acc;
+          toast(`Вход выполнен: ${acc.username}`, 'ok');
+        } catch (err) {
+          state.ms = null;
+          toast(err.message || 'Не удалось войти через Microsoft', 'err');
+        } finally {
+          t.disabled = false;
+          renderSidebarFoot();
+          return renderView();
+        }
+      }
+      case 'ms-open-link': {
+        if (!state.ms) return;
+        return window.ember.openUrl(state.ms.verificationUriComplete || state.ms.verificationUri);
+      }
+      case 'ms-copy': {
+        if (!state.ms) return;
+        await window.ember.copyText(state.ms.userCode);
+        return toast('Код скопирован', 'ok');
+      }
+      case 'ms-cancel': {
+        await window.ember.auth.msCancel();
+        state.ms = null;
+        toast('Вход отменён');
         return renderView();
       }
 

@@ -313,7 +313,7 @@ async function launch(opts) {
     auth_session: account.accessToken || '0',
     clientid: '',
     auth_xuid: '',
-    user_type: account.type === 'elyby' ? 'mojang' : 'legacy',
+    user_type: account.type === 'elyby' ? 'mojang' : account.type === 'microsoft' ? 'msa' : 'legacy',
     version_type: vanilla.type || 'release',
     natives_directory: nativesDir,
     launcher_name: LAUNCHER_NAME,

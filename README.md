@@ -4,7 +4,7 @@
 
 ## Что умеет
 
-- **Аккаунты**: Ely.by (логин/пароль, поддержка 2FA через `пароль:код`) и оффлайн-режим.
+- **Аккаунты**: Microsoft (официальный вход по коду через microsoft.com/link — Xbox Live и Minecraft services), Ely.by (логин/пароль, поддержка 2FA через `пароль:код`) и оффлайн-режим.
 - **Загрузчики**: Vanilla, Fabric, Quilt, Forge и NeoForge. Для каждой сборки можно выбрать версию загрузчика.
 - **Minecraft на Rust**: отдельные движки Horizon и Rustcraft — это не загрузчики, а самостоятельные клиенты Minecraft Java Edition 26.3, переписанные на Rust. У них своя вкладка, свои сборки, своя папка игры и свои моды.
 - **Версии Minecraft**: любая версия из манифеста Mojang (релизы и снапшоты). Для Vanilla моды не показываются и не ставятся: сначала создайте сборку с загрузчиком.
@@ -60,15 +60,15 @@ npm install
 npm start
 ```
 
-## Сборка Windows exe
+## Сборка
 
-```bash
-npm run dist
-```
+| Платформа | Команда | Результат |
+| --- | --- | --- |
+| Windows | `npm run dist` | `dist/EMBER Launcher Setup 2.2.0.exe` (NSIS) |
+| Linux | `npm run dist:linux` | `EMBER-Launcher-2.2.0-linux-x86_64.AppImage`, `-linux-amd64.deb`, `-linux-x64.tar.gz` |
+| macOS | `npm run dist:mac` | `EMBER-Launcher-2.2.0-mac-x64.zip` (Intel) и `EMBER-Launcher-2.2.0-mac-arm64.zip` (Apple Silicon), DMG — только на macOS |
 
-Результат появляется в `dist/`: установщик `EMBER Launcher Setup 2.1.3.exe`. Портативная сборка отключена, чтобы файл был компактным.
-
-Сборка на Linux требует Wine (с 32-битной частью) для редактирования ресурсов exe.
+Сборка Windows-установщика на Linux требует Wine (с 32-битной частью) для редактирования ресурсов exe. Сборка DMG выполняется на macOS (или через workflow `build-all.yml` в GitHub Actions). Zip-сборки macOS без подписи: при первом запуске щёлкните правой кнопкой → «Открыть».
 
 ## Структура
 
