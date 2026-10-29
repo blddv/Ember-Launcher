@@ -1,9 +1,12 @@
 name: Build all platforms
 
 on:
-  push:
-    branches: [arena/8bde5889-ember-launcher]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: GitHub release tag to attach builds to
+        required: true
+        default: 2.2.0
 
 permissions:
   contents: write
@@ -16,15 +19,20 @@ jobs:
         include:
           - os: windows-latest
             cmd: npx electron-builder --win --x64 --publish never
-            artifact: dist/EMBER Launcher Setup *.exe
+            artifact: dist/*.exe
             name: windows-setup
           - os: ubuntu-latest
             cmd: npx electron-builder --linux --x64 --publish never
-            artifact: dist/EMBER-Launcher-*-linux-x64.*
+            artifact: |
+              dist/*.AppImage
+              dist/*.deb
+              dist/*.tar.gz
             name: linux
           - os: macos-latest
             cmd: npx electron-builder --mac --publish never
-            artifact: dist/EMBER-Launcher-*-mac-*
+            artifact: |
+              dist/*.zip
+              dist/*.dmg
             name: macos
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
@@ -64,3 +72,46 @@ jobs:
           name: EMBER-Launcher-${{ matrix.name }}
           path: ${{ matrix.artifact }}
           if-no-files-found: ignore
+
+      - name: Attach builds to GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=( ${{ matrix.artifact }} )
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No release files matched for ${{ matrix.name }}" >&2
+            exit 1
+          fi
+          printf 'Uploading to %s:\n' "$RELEASE_TAG"
+          printf '  %s\n' "${files[@]}"
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+
+  checksums:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download platform builds
+        uses: actions/download-artifact@v4
+        with:
+          pattern: EMBER-Launcher-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate and attach SHA-256 checksums
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          cd artifacts
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' -print0 \
+            | sort -z \
+            | xargs -0 sha256sum > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          gh release upload "$RELEASE_TAG" SHA256SUMS.txt --clobber
