@@ -38,12 +38,18 @@ function render(d) {
 
   const p = d.parsed;
   const heap = p.heapUsedMiB != null ? `${p.heapUsedMiB} из ${p.heapMaxMiB} МБ` : 'нет данных';
+  // У Minecraft на Rust нет Java: в технических данных показываем движок, а не JVM
+  const isRust = !!d.engine;
+  const runtimeRows = isRust
+    ? `<span>Движок</span><span>${esc(d.engine)} (Rust)</span>`
+    : `<span>Java</span><span>${esc(p.java) || '—'}</span>
+       <span>Куча Java при падении</span><span>${esc(heap)}</span>`;
 
   root.innerHTML = `
     <header class="crash-head">
       <div class="crash-dot">!</div>
       <div>
-        <h1>Minecraft закрылся с ошибкой</h1>
+        <h1>${isRust ? esc(d.engine) : 'Minecraft'} закрылся с ошибкой</h1>
         <div class="sub">${esc(sub)}</div>
       </div>
     </header>
@@ -73,8 +79,7 @@ function render(d) {
           <span>Вызвано</span><span>${esc(p.caused) || '—'}</span>
           <span>Подозреваемые моды</span><span>${esc(p.suspected) || '—'}</span>
           <span>Minecraft</span><span>${esc(p.minecraft) || '—'}</span>
-          <span>Java</span><span>${esc(p.java) || '—'}</span>
-          <span>Куча Java при падении</span><span>${esc(heap)}</span>
+          ${runtimeRows}
           <span>Файл отчёта</span><span>${esc(d.reportPath) || 'не найден'}</span>
           ${d.hsErrPath ? `<span>Файл hs_err</span><span>${esc(d.hsErrPath)}</span>` : ''}
         </div>

@@ -15,6 +15,7 @@ const DEFAULTS = {
   fullscreen: false,
   closeOnLaunch: false,     // закрыть лаунчер после старта игры
   showLogOnLaunch: false,   // сразу открыть лог на главной
+  rustPlayerName: '',       // ник в Minecraft на Rust (Horizon --name, Rustcraft)
   // Интерфейс
   animations: true,
   // Ключи и токены

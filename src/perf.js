@@ -21,7 +21,7 @@ const PRESETS = {
   potato: {
     label: 'Очень оптимизировано',
     desc: 'Для слабых ПК: дистанция 4, быстрая графика без теней и облаков, 60 FPS, '
-      + 'SerialGC и лёгкий JIT, моды-оптимизаторы.',
+      + 'стабильный G1-сборщик мусора, моды-оптимизаторы.',
   },
 };
 
@@ -44,7 +44,7 @@ const OPTIONS = {
   },
   potato: {
     renderDistance: 4,
-    simulationDistance: 5,
+    simulationDistance: 4,
     graphicsMode: 0,
     particles: 2,
     mipmapLevels: 0,
@@ -75,14 +75,15 @@ const PACK = {
   vanilla: [],
 };
 
-// JVM-флаги для пресета. Объём памяти приходит из настроек лаунчера, пресет его не меняет
+// JVM-флаги для пресета. Объём памяти приходит из настроек лаунчера, пресет его не меняет.
+// Раньше «Очень оптимизировано» добавляло -XX:TieredStopAtLevel=1 и -XX:+UseSerialGC, и это
+// давало обратный эффект: игра без JIT-разгона (только C1) держит низкий FPS, а SerialGC
+// на многогигабайтной куче Minecraft устраивает долгие паузы сборки мусора — то есть пресет
+// лагал сильнее «Оптимизировано». Теперь для него берём обычный G1 и не трогаем JIT: выигрыш
+// дают только настройки options.txt и моды-оптимизаторы, а не «облегчение» JVM.
 function launchTuning(preset, ram) {
   if (preset === 'potato') {
-    return {
-      ram,
-      gc: 'serial',
-      jvm: ['-XX:TieredStopAtLevel=1', '-XX:+DisableExplicitGC'],
-    };
+    return { ram, gc: 'g1', jvm: [] };
   }
   if (preset === 'optimized') {
     return { ram, gc: null, jvm: [] };
