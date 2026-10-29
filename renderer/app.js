@@ -45,6 +45,7 @@ const ICONS = {
   image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>',
   alert: '<path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
   cmd: '<path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>',
+  bolt: '<path d="M13 2L4 14h6l-1 8 10-13h-6l1-7z"/>',
 };
 const icon = (n, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[n] || ''}</svg>`;
 
@@ -52,6 +53,7 @@ const NAV = [
   { group: 'Игра', items: [
     { id: 'home', label: 'Главная', icon: 'home' },
     { id: 'instances', label: 'Сборки', icon: 'layers' },
+    { id: 'rust', label: 'Minecraft Rust', icon: 'bolt' },
     { id: 'screens', label: 'Скриншоты', icon: 'image' },
   ] },
   { group: 'Контент', items: [
@@ -72,6 +74,20 @@ const LOADERS = [
 ];
 const LOADER_LABEL = Object.fromEntries(LOADERS.map(l => [l.id, l.label]));
 const MOD_LOADERS = ['fabric', 'quilt', 'forge', 'neoforge'];
+
+// Minecraft на Rust: отдельные движки, а не загрузчики Java-модов
+const RUST_PLATFORMS = [
+  { id: 'horizon', label: 'Horizon', color: '#F2A65A', game: '26.3' },
+  { id: 'rustcraft', label: 'Rustcraft', color: '#7BD1A8', game: '26.3' },
+];
+const PLATFORM_LABEL = { java: 'Java Edition', horizon: 'Horizon', rustcraft: 'Rustcraft' };
+const platformOf = i => {
+  if (!i) return 'java';
+  if (i.platform === 'horizon' || i.platform === 'rustcraft') return i.platform;
+  return RUST_PLATFORMS.some(p => p.id === i.loader) ? i.loader : 'java';
+};
+const isRust = i => platformOf(i) !== 'java';
+const RUST_SOURCE = src => src === 'horizon' || src === 'horizon-github';
 
 const state = {
   view: 'home',
@@ -96,15 +112,22 @@ const state = {
   musicFolder: '',
   screens: null,
   loaderCache: {},
+  rustInfo: null,
+  rustError: '',
+  rustCache: {},
 };
 
+// platform: java — источники Java Edition, rust — только для Minecraft на Rust.
+// Списки не смешиваются: .jar не работает в Horizon, а .hmod — в Java.
 const SOURCES = [
-  { id: 'modrinth', label: 'Modrinth', color: '#1BD96A' },
-  { id: 'curseforge', label: 'CurseForge', color: '#F16436' },
-  { id: 'hangar', label: 'Hangar', color: '#4C8DFF' },
-  { id: 'smithed', label: 'Smithed', color: '#B98BFF' },
-  { id: 'github', label: 'GitHub', color: '#E6EDF3' },
-  { id: 'link', label: 'По ссылке', color: '#FF9A4D' },
+  { id: 'modrinth', label: 'Modrinth', color: '#1BD96A', platform: 'java' },
+  { id: 'curseforge', label: 'CurseForge', color: '#F16436', platform: 'java' },
+  { id: 'hangar', label: 'Hangar', color: '#4C8DFF', platform: 'java' },
+  { id: 'smithed', label: 'Smithed', color: '#B98BFF', platform: 'java' },
+  { id: 'github', label: 'GitHub', color: '#E6EDF3', platform: 'java' },
+  { id: 'horizon', label: 'Horizon (Rust)', color: '#F2A65A', platform: 'rust' },
+  { id: 'horizon-github', label: 'Rust: GitHub', color: '#E6EDF3', platform: 'rust' },
+  { id: 'link', label: 'По ссылке', color: '#FF9A4D', platform: 'any' },
 ];
 const KINDS = {
   modrinth: [['mod', 'Моды'], ['modpack', 'Сборки'], ['resourcepack', 'Ресурспаки']],
@@ -112,13 +135,17 @@ const KINDS = {
   hangar: [['plugin', 'Плагины Paper']],
   smithed: [['datapack', 'Датапаки'], ['resourcepack', 'Ресурспаки']],
   github: [['mod', 'Моды (релизы)']],
+  horizon: [['mod', 'Моды'], ['modpack', 'Сборки'], ['resourcepack', 'Ресурспаки']],
+  'horizon-github': [['mod', 'Моды (релизы)']],
   link: [['link', 'Файл по ссылке']],
 };
 const SOURCE_HINTS = {
   smithed: 'Smithed: датапаки и ресурспаки. Датапак кладётся в сборку, а в мир его нужно скопировать вручную. Здесь одна страница результатов (API не поддерживает пагинацию).',
   github: 'GitHub: берётся последний релиз репозитория и его .jar под ваш загрузчик. Зависимости ставьте отдельно.',
   hangar: 'Hangar: плагины для Paper-серверов. Файлы сохраняются в папку server-plugins, а не в клиент.',
-  link: 'Вставьте прямую ссылку на файл с любого сайта: .jar (мод), .zip (ресурспак) или .mrpack (сборка).',
+  horizon: 'Horizon: официальный реестр модов для Minecraft на Rust (playhorizon.dev/mods). Проверенные .hmod и .hnmod, сборки .hpack и ресурспаки. Каждый файл сверяется по SHA-256, снятые с публикации не ставятся.',
+  'horizon-github': 'GitHub: .hmod из последнего релиза репозитория, которого ещё нет в реестре Horizon. Такие файлы никто не проверял — ставьте на свой риск.',
+  link: 'Прямая ссылка: .jar и .mrpack — для Java Edition, .hmod, .hnmod и .hpack — для Minecraft на Rust, .zip — ресурспак в любую сборку.',
 };
 
 /* ================= Утилиты ================= */
@@ -133,7 +160,14 @@ function toast(msg, kind = '') {
 
 const selectedInst = () => state.instances.find(i => i.id === state.selected) || null;
 const hasLoader = i => !!i && MOD_LOADERS.includes(i.loader);
-const loaderName = i => (i.loader === 'vanilla' ? 'Vanilla' : `${LOADER_LABEL[i.loader] || i.loader}${i.loaderVersion ? ' ' + i.loaderVersion : ''}`);
+const loaderName = i => {
+  const p = platformOf(i);
+  if (p !== 'java') {
+    const label = (RUST_PLATFORMS.find(x => x.id === p) || {}).label || p;
+    return `Rust · ${label}${i.loaderVersion ? ' ' + i.loaderVersion : ''}`;
+  }
+  return i.loader === 'vanilla' ? 'Vanilla' : `${LOADER_LABEL[i.loader] || i.loader}${i.loaderVersion ? ' ' + i.loaderVersion : ''}`;
+};
 
 function progressHTML(p) {
   if (!p) return '';
@@ -202,7 +236,7 @@ function renderSidebarFoot() {
         <span>${a ? (a.type === 'elyby' ? 'Ely.by' : 'Оффлайн') : 'Войдите во вкладке «Аккаунт»'}</span>
       </div>
     </div>
-    <div class="ver-foot">Minecraft · Fabric · Quilt · Forge · NeoForge</div>`;
+    <div class="ver-foot">Minecraft · Fabric · Quilt · Forge · NeoForge · Rust</div>`;
 }
 
 function setView(v) {
@@ -213,6 +247,7 @@ function setView(v) {
   renderView();
   if (v === 'mods') runSearch(true);
   if (v === 'screens') loadScreens();
+  if (v === 'rust') loadRustPage();
 }
 
 let observer = null;
@@ -221,7 +256,7 @@ function renderView() {
   const el = $('#view');
   if (!el) return;
   if (observer) { observer.disconnect(); observer = null; }
-  const views = { home: viewHome, instances: viewInstances, mods: viewMods, account: viewAccount, settings: viewSettings, screens: viewScreens };
+  const views = { home: viewHome, instances: viewInstances, rust: viewRust, mods: viewMods, account: viewAccount, settings: viewSettings, screens: viewScreens };
   el.innerHTML = views[state.view]();
   el.scrollTop = 0;
   renderBusy();
@@ -247,17 +282,23 @@ function renderBusy() {
 
 function viewHome() {
   const inst = selectedInst();
+  const rust = isRust(inst);
   const ov = state.settings.orangeVisuals;
   const perf = state.settings.perf || { preset: 'standard' };
   let modChip;
-  if (!ov.enabled) modChip = '<span class="chip off"><span class="dot"></span>Orange Visuals выключен</span>';
+  if (rust) {
+    const label = (RUST_PLATFORMS.find(p => p.id === platformOf(inst)) || {}).label || 'Rust';
+    modChip = `<span class="chip ok"><span class="dot"></span>${esc(label)} · Minecraft на Rust</span>`;
+  } else if (!ov.enabled) modChip = '<span class="chip off"><span class="dot"></span>Orange Visuals выключен</span>';
   else if (state.mod && state.mod.active) modChip = '<span class="chip ok"><span class="dot"></span>Orange Visuals активен</span>';
   else if (state.mod && state.mod.reason) modChip = `<span class="chip off"><span class="dot"></span>Orange Visuals: ${esc(state.mod.reason)}</span>`;
   else modChip = '<span class="chip"><span class="dot"></span>Orange Visuals включится при запуске</span>';
 
-  const accChip = state.account
-    ? `<span class="chip ok"><span class="dot"></span>${esc(state.account.username)} · ${state.account.type === 'elyby' ? 'Ely.by' : 'оффлайн'}</span>`
-    : '<span class="chip off"><span class="dot"></span>Аккаунт не выбран</span>';
+  const accChip = rust
+    ? '<span class="chip ok"><span class="dot"></span>Аккаунт Java не нужен</span>'
+    : state.account
+      ? `<span class="chip ok"><span class="dot"></span>${esc(state.account.username)} · ${state.account.type === 'elyby' ? 'Ely.by' : 'оффлайн'}</span>`
+      : '<span class="chip off"><span class="dot"></span>Аккаунт не выбран</span>';
 
   const perfChip = `<span class="chip ${perf.preset === 'standard' ? '' : 'ok'}"><span class="dot"></span>Пресет: ${esc(PERF_LABEL[perf.preset] || perf.preset)}</span>`;
 
@@ -266,8 +307,10 @@ function viewHome() {
     : `<button class="play" data-act="play" ${state.preparing ? 'disabled' : ''}>${state.preparing ? 'ПОДГОТОВКА…' : 'ИГРАТЬ'}</button>`;
 
   const totalMs = state.instances.reduce((s, i) => s + (i.playMs || 0), 0);
-  const warn = inst && !hasLoader(inst)
-    ? `<div class="note warn" style="margin-top:16px">Сборка «${esc(inst.name)}» без загрузчика модов. Моды не запустятся — создайте сборку с Fabric, Quilt, Forge или NeoForge.</div>` : '';
+  const warn = inst && rust
+    ? `<div class="note" style="margin-top:16px">${esc((RUST_PLATFORMS.find(p => p.id === platformOf(inst)) || {}).label || 'Rust')}: движок на Rust. Моды — из реестра Horizon (.hmod), Java-моды не подходят. Нужна ваша копия Minecraft ${esc(inst.version)}.</div>`
+    : inst && !hasLoader(inst)
+      ? `<div class="note warn" style="margin-top:16px">Сборка «${esc(inst.name)}» без загрузчика модов. Моды не запустятся — создайте сборку с Fabric, Quilt, Forge или NeoForge.</div>` : '';
   const cover = inst && inst.coverUrl ? `<img class="hero-cover" src="${esc(inst.coverUrl)}" alt="">` : '';
 
   return `
@@ -282,7 +325,7 @@ function viewHome() {
       <div class="play-row">
         ${playBtn}
         <select class="input" id="home-inst" style="min-width:260px;height:52px" ${state.running ? 'disabled' : ''}>
-          ${state.instances.map(i => `<option value="${esc(i.id)}" ${i.id === state.selected ? 'selected' : ''}>${esc(i.name)} — ${esc(i.version)} · ${esc(LOADER_LABEL[i.loader])}</option>`).join('') || '<option>Нет сборок</option>'}
+          ${state.instances.map(i => `<option value="${esc(i.id)}" ${i.id === state.selected ? 'selected' : ''}>${esc(i.name)} — ${esc(i.version)} · ${esc(loaderName(i))}</option>`).join('')} || '<option>Нет сборок</option>'}
         </select>
         <button class="btn log-toggle" data-act="toggle-log">${icon('terminal')} ${state.showLog ? 'Скрыть лог' : 'Показать лог'}</button>
       </div>
@@ -306,7 +349,7 @@ function viewHome() {
       </div>
       <div class="card">
         <h3>Быстрый старт</h3>
-        <div class="hint">1) «Аккаунт» — войдите через Ely.by или играйте оффлайн. 2) «Сборки» — создайте сборку с нужным загрузчиком и обложкой. 3) «Настройки» — выберите пресет «Очень оптимизировано» для слабого ПК. Ctrl+K открывает командную палитру. В игре клавиша меню (по умолчанию R Shift) открывает меню Orange Visuals.</div>
+        <div class="hint">1) «Аккаунт» — войдите через Ely.by или играйте оффлайн. 2) «Сборки» — создайте сборку с нужным загрузчиком и обложкой. 3) «Настройки» — выберите пресет «Очень оптимизировано» для слабого ПК. Minecraft на Rust — отдельная вкладка: там движки Horizon и Rustcraft и их моды. Ctrl+K открывает командную палитру. В игре клавиша меню (по умолчанию R Shift) открывает меню Orange Visuals.</div>
       </div>
     </div>`;
 }
@@ -334,7 +377,7 @@ function instCards() {
   const q = state.instQuery.trim().toLowerCase();
   const list = state.instances.filter(i => !q || `${i.name} ${i.version} ${loaderName(i)}`.toLowerCase().includes(q));
   if (q && !list.length) return '<div class="empty" style="grid-column:1/-1">Ничего не найдено</div>';
-  const add = q ? '' : '<div class="add-card" data-act="new-inst"><div><b>+ Новая сборка</b>Vanilla, Fabric, Quilt, Forge или NeoForge</div></div>';
+  const add = q ? '' : '<div class="add-card" data-act="new-inst"><div><b>+ Новая сборка</b>Vanilla, Fabric, Quilt, Forge, NeoForge или Minecraft на Rust</div></div>';
   return list.map(instCard).join('') + add;
 }
 
@@ -353,6 +396,7 @@ function instCard(i) {
       <div class="tags">
         <span class="tag">Minecraft ${esc(i.version)}</span>
         <span class="tag ${hasLoader(i) ? 'fab' : ''}">${esc(loaderName(i))}</span>
+        ${isRust(i) ? `<span class="tag fab">${esc((RUST_PLATFORMS.find(p => p.id === platformOf(i)) || {}).label || 'Rust')} · Rust</span>` : ''}
       </div>
       <div class="actions">
         ${i.id === state.selected ? '' : `<button class="btn small primary" data-act="select-inst" data-id="${id}">Выбрать</button>`}
@@ -409,11 +453,36 @@ function coverResultsHTML() {
       </button>`).join('')}</div>`;
 }
 
+function releaseId() {
+  const rel = state.versions.find(v => v.type === 'release');
+  return rel ? rel.id : (state.versions[0] ? state.versions[0].id : '');
+}
+
+// Блок выбора версии Rust-движка (заменяет выбор загрузчика)
+function rustBlockHTML(m) {
+  const p = RUST_PLATFORMS.find(x => x.id === (m.platform || 'horizon')) || RUST_PLATFORMS[0];
+  const info = (state.rustInfo || []).find(x => x.id === p.id) || {};
+  const cache = state.rustCache[p.id];
+  const head = `<div class="hint" style="margin-bottom:8px">Minecraft ${esc(info.game || p.game)} · движок ${esc(p.label)}. ${info.mods ? 'У него свой реестр модов .hmod.' : 'Модов нет: только игра и ресурспаки.'}</div>`;
+  if (!cache || cache.loading) return `${head}<div class="hint">Загружаю версии ${esc(p.label)}…</div>`;
+  if (cache.error) return `${head}<div class="note warn">${esc(cache.error)}</div>`;
+  return `${head}
+    <select class="input" id="ni-rust-tag">
+      <option value="">Авто (последняя версия)</option>
+      ${cache.list.slice(0, 40).map(r => `<option value="${esc(r.tag)}" ${r.tag === m.loaderVersion ? 'selected' : ''}>${esc(r.tag)}${r.prerelease ? ' (тест)' : ''}</option>`).join('')}
+    </select>
+    <div class="hint">Движок скачается с GitHub. Horizon один раз готовит данные из вашей копии Minecraft ${esc(p.game)}; JDK 25 лаунчер скачает сам.</div>`;
+}
+
 function modalNewInstance() {
   const m = state.modal;
+  const plat = m.platform || 'java';
+  const rust = plat !== 'java';
   const versions = state.versions.filter(v => (m.snap ? true : v.type === 'release'));
   const opts = versions.map(v => `<option value="${esc(v.id)}" ${v.id === m.version ? 'selected' : ''}>${esc(v.id)}${v.type !== 'release' ? ' (снапшот)' : ''}</option>`).join('');
   const letter = (m.name || 'Новая сборка')[0].toUpperCase();
+  const rustP = RUST_PLATFORMS.find(x => x.id === plat);
+  const rustInfo = (state.rustInfo || []).find(x => x.id === plat) || {};
 
   return `
   <div class="modal-bg" data-act="close-modal">
@@ -422,6 +491,20 @@ function modalNewInstance() {
       <div class="ni-layout">
         <div class="ni-form">
           <div class="field"><label>Название</label><input class="input" id="ni-name" placeholder="Например: Выживание" value="${esc(m.name)}" maxlength="64" autocomplete="off"></div>
+          <div class="field"><label>Платформа</label>
+            <div class="seg wrap">
+              <button class="${!rust ? 'active' : ''}" data-platform="java">Java Edition</button>
+              ${RUST_PLATFORMS.map(p => `<button class="${plat === p.id ? 'active' : ''}" data-platform="${p.id}">${p.label} (Rust)</button>`).join('')}
+            </div>
+            <div class="hint">Minecraft на Rust — отдельный движок: своя папка, свои моды (.hmod) и своя страница «Minecraft Rust». Java-моды и загрузчики к нему не подходят.</div>
+          </div>
+          ${rust ? `
+          <div class="grid-2 tight">
+            <div class="field"><label>Версия движка ${esc(rustP ? rustP.label : '')}</label><div id="ni-rust-wrap">${rustBlockHTML(m)}</div></div>
+            <div class="field"><label>Minecraft</label><input class="input" value="${esc((rustInfo.game || (rustP && rustP.game) || '26.3'))}" disabled></div>
+          </div>
+          <div class="note" style="margin-top:4px">Аккаунт Java не нужен: Horizon входит в игру сам${rustP && rustP.id === 'rustcraft' ? ', Rustcraft запускается с ником из лаунчера' : ''}. Данные игры берутся из вашей копии Minecraft.</div>
+          ` : `
           <div class="grid-2 tight">
             <div class="field"><label>Версия Minecraft</label>
               <select class="input" id="ni-version">${opts}</select>
@@ -434,7 +517,7 @@ function modalNewInstance() {
               ${LOADERS.map(l => `<button class="${m.loader === l.id ? 'active' : ''}" data-loader="${l.id}">${l.label}</button>`).join('')}
             </div>
             <div class="hint">Моды Fabric, Quilt, Forge и NeoForge ставятся только в сборку с подходящим загрузчиком. Forge и NeoForge устанавливаются автоматически при первом запуске.</div>
-          </div>
+          </div>`}
         </div>
         <div class="ni-cover">
           <div class="field"><label>Обложка</label>
@@ -518,7 +601,7 @@ function modalMods() {
   <div class="modal-bg" data-act="close-modal">
     <div class="modal wide">
       <h2>Моды: ${esc(inst ? inst.name : '')}</h2>
-      <div class="hint" style="margin-bottom:12px">${inst ? esc(loaderName(inst)) + ' · Minecraft ' + esc(inst.version) : ''}. Выключенный мод переименовывается в .disabled и не загружается.</div>
+      <div class="hint" style="margin-bottom:12px">${inst ? esc(loaderName(inst)) + ' · Minecraft ' + esc(inst.version) : ''}. ${inst && isRust(inst) ? 'Моды .hmod из реестра Horizon: включение и выключение пишется в horizon-mods.txt.' : 'Выключенный мод переименовывается в .disabled и не загружается.'}</div>
       <div class="mod-list">${rows}</div>
       ${hidden}
       <div class="actions">
@@ -550,6 +633,8 @@ function paletteItems() {
     { label: 'Играть (выбранная сборка)', hint: 'Запуск', run: () => launch() },
     { label: state.running ? 'Остановить игру' : 'Остановить игру (сейчас не запущена)', run: () => window.ember.game.stop() },
     { label: 'Новая сборка', run: () => openNewInstance() },
+    { label: 'Новая сборка Horizon (Minecraft на Rust)', hint: 'Rust', run: () => openRustInstance('horizon') },
+    { label: 'Моды для Minecraft на Rust (реестр Horizon)', hint: 'Rust', run: () => setView('rust') },
     { label: 'Импорт сборки из .zip', run: () => importZip() },
     { label: 'Оптимизация: применить пресет к выбранной сборке', run: () => applyPerf() },
     { label: 'Поиск модов', run: () => setView('mods') },
@@ -609,9 +694,12 @@ function syncModal() {
   const n = $('#ni-name');
   const v = $('#ni-version');
   const lv = $('#ni-lv');
+  const rt = $('#ni-rust-tag');
   if (n) state.modal.name = n.value;
   if (v) state.modal.version = v.value;
   if (lv) state.modal.loaderVersion = lv.value;
+  // Rust-сборка: выбранная версия движка (пусто — последняя)
+  if (rt) state.modal.loaderVersion = rt.value;
 }
 
 // Обновляет только блок «Версия загрузчика», без перерисовки всей модалки и без потери фокуса
@@ -642,11 +730,43 @@ function newCoverSearch(act) {
 }
 
 function openNewInstance(loader = 'fabric') {
-  const release = state.versions.find(v => v.type === 'release');
-  state.modal = { type: 'new', name: '', version: release ? release.id : '', loader, loaderVersion: '', snap: false, cover: null, autofocus: true };
+  state.modal = {
+    type: 'new', platform: 'java', name: '', version: releaseId(), loader, loaderVersion: '',
+    snap: false, cover: null, autofocus: true,
+  };
   state.coverSearch = newCoverSearch('ni-pick-result');
   renderModal();
   ensureLoaderList(loader, state.modal.version);
+}
+
+// Сборка Minecraft на Rust: загрузчика нет, вместо него — версия движка
+function openRustInstance(platformId = 'horizon') {
+  const p = RUST_PLATFORMS.find(x => x.id === platformId) || RUST_PLATFORMS[0];
+  const info = (state.rustInfo || []).find(x => x.id === p.id) || {};
+  const game = info.game || p.game;
+  state.modal = {
+    type: 'new', platform: p.id, name: '', version: game, gameVersion: game,
+    loader: p.id, loaderVersion: '', snap: false, cover: null, autofocus: true,
+  };
+  state.coverSearch = newCoverSearch('ni-pick-result');
+  renderModal();
+  ensureRustList(p.id);
+}
+
+async function ensureRustList(platformId) {
+  const hit = state.rustCache[platformId];
+  if (hit && !hit.error) return;
+  state.rustCache[platformId] = { loading: true };
+  try {
+    const list = await window.ember.rust.releases(platformId);
+    state.rustCache[platformId] = { list };
+  } catch (e) {
+    state.rustCache[platformId] = { error: `Не удалось получить версии ${platformId}: ${e.message}` };
+  }
+  if (state.modal && state.modal.type === 'new' && state.modal.platform === platformId) {
+    const w = $('#ni-rust-wrap');
+    if (w) w.innerHTML = rustBlockHTML(state.modal);
+  }
 }
 
 function openCoverModal(id) {
@@ -694,52 +814,98 @@ async function runCoverSearch() {
 function viewMods() {
   const s = state.search;
   const inst = selectedInst();
+  const rust = isRust(inst);
+
+  // Источники под платформу выбранной сборки: Java-моды и моды для Rust не смешиваются.
+  // Пока сборка не выбрана, показываем всё — так можно установить сборку из реестра Horizon.
+  const sources = SOURCES.filter(src => !inst || src.platform === 'any' || (rust ? src.platform === 'rust' : src.platform === 'java'));
+  if (!sources.some(src => src.id === s.source)) {
+    s.source = sources[0].id;
+    s.kind = KINDS[s.source][0][0];
+  }
   const kinds = KINDS[s.source];
   if (!kinds.some(k => k[0] === s.kind)) s.kind = kinds[0][0];
+  const src = SOURCES.find(x => x.id === s.source) || sources[0];
+
   const cfWarn = s.source === 'curseforge' && !state.settings.curseforgeKey
     ? '<div class="note warn" style="margin-bottom:14px">Для CurseForge нужен бесплатный API-ключ. <a href="#" data-act="go-settings">Вставить в Настройках</a> — ключ берётся на console.curseforge.com.</div>'
     : '';
   const needLoader = s.kind === 'mod' && (s.source === 'modrinth' || s.source === 'curseforge' || s.source === 'github');
-  const loaderWarn = needLoader && !hasLoader(inst)
+  const loaderWarn = !rust && needLoader && !hasLoader(inst)
     ? `<div class="empty loader-empty">
         <div class="big-ico">${icon('puzzle')}</div>
         <b>${inst ? `В сборке «${esc(inst.name)}» нет загрузчика модов` : 'Нет выбранной сборки'}</b>
-        <p>Моды работают только с загрузчиком: Fabric, Quilt, Forge или NeoForge. Чистая Vanilla их не запускает, поэтому список модов скрыт.</p>
+        <p>Моды Java Edition работают только с загрузчиком: Fabric, Quilt, Forge или NeoForge. Чистая Vanilla их не запускает, поэтому список модов скрыт.</p>
         <div class="row" style="justify-content:center">
           ${MOD_LOADERS.map(l => `<button class="btn ${l === 'fabric' ? 'primary' : ''}" data-act="new-inst-loader" data-loader="${l}">${icon('plus')} Сборка с ${LOADER_LABEL[l]}</button>`).join('')}
         </div>
       </div>`
     : '';
+  // Источник для Minecraft на Rust, а сборка Java (или не выбрана вовсе)
+  const rustWarn = src.platform === 'rust' && !rust
+    ? `<div class="empty loader-empty">
+        <div class="big-ico">${icon('bolt')}</div>
+        <b>Это моды для Minecraft на Rust</b>
+        <p>Horizon запускает только .hmod из своего реестра: Java-сборка такой файл не увидит. Создайте сборку Horizon или откройте раздел «Minecraft Rust».</p>
+        <div class="row" style="justify-content:center">
+          <button class="btn primary" data-act="rust-new" data-platform="horizon">${icon('plus')} Создать сборку Horizon</button>
+          <button class="btn" data-act="go-rust">${icon('bolt')} Что такое Minecraft на Rust</button>
+        </div>
+      </div>`
+    : '';
+  // Rustcraft — клиент без модов: искать .hmod для него бессмысленно
+  const rustcraftWarn = inst && platformOf(inst) === 'rustcraft'
+    ? `<div class="empty loader-empty">
+        <div class="big-ico">${icon('bolt')}</div>
+        <b>Rustcraft запускается без модов</b>
+        <p>Это клиент вместо java.exe: он заменяет Java, но своей системы модов у него нет. Моды .hmod работают только в Horizon — там свой реестр. Ресурспаки в эту сборку ставить можно: вкладка «По ссылке», файл .zip.</p>
+        <div class="row" style="justify-content:center">
+          <button class="btn primary" data-act="rust-new" data-platform="horizon">${icon('plus')} Создать сборку Horizon</button>
+          <button class="btn" data-act="go-rust">${icon('bolt')} Подробнее о движках</button>
+        </div>
+      </div>`
+    : '';
+  const blocked = loaderWarn || rustWarn || rustcraftWarn;
 
   const sameVer = s.onlySameVersion && inst;
+  const where = inst
+    ? `Установка в «${esc(inst.name)}» (Minecraft ${esc(inst.version)}, ${esc(loaderName(inst))})`
+    : 'Сборка не выбрана: моды ставить некуда, сборки из реестра создадут новую сборку';
+  const platformHint = rust && platformOf(inst) === 'horizon'
+    ? ' Это сборка Horizon: Java-моды из Modrinth и CurseForge в неё не ставятся.'
+    : '';
+  const verNote = src.platform === 'java' && inst && !sameVer ? ' Фильтр по версии выключен, проверяйте совместимость.' : '';
+
+  // Поиск не рисуем вовсе, когда ставить некуда: блокирующая подсказка уже на экране
+  const searchArea = blocked ? '' : `
+    <div class="toolbar">
+      <div class="search-box">
+        ${icon('search')}
+        <input class="input" id="search-q" placeholder="${src.platform === 'rust' ? 'Поиск: minimap, zoom, veinminer…' : 'Поиск: sodium, JEI, Better Minecraft…'}" value="${esc(s.query)}">
+      </div>
+    </div>
+    <div id="results"></div>`;
+
   return `
     <h1 class="page-title">Моды и сборки</h1>
-    <p class="page-sub">Modrinth, CurseForge, Hangar, Smithed и GitHub: поиск, бесконечная прокрутка и установка в одно нажатие.</p>
+    <p class="page-sub">Java Edition: Modrinth, CurseForge, Hangar, Smithed и GitHub. Minecraft на Rust: реестр Horizon и .hmod из GitHub.</p>
     <div class="src-tabs">
-      ${SOURCES.map(src => `<button class="src-tab ${s.source === src.id ? 'active' : ''}" data-src="${src.id}"><i style="color:${src.color}"></i>${src.label}</button>`).join('')}
+      ${sources.map(src => `<button class="src-tab ${s.source === src.id ? 'active' : ''}" data-src="${src.id}"><i style="color:${src.color}"></i>${src.label}</button>`).join('')}
     </div>
     <div class="toolbar">
       <div class="seg">
         ${kinds.map(k => `<button class="${s.kind === k[0] ? 'active' : ''}" data-kind="${k[0]}">${k[1]}</button>`).join('')}
       </div>
       <div class="grow"></div>
-      <label class="hint check"><input type="checkbox" id="only-inst" ${s.onlySameVersion ? 'checked' : ''} ${s.source === 'hangar' || s.source === 'link' ? 'disabled' : ''}> Только версия выбранной сборки</label>
+      <label class="hint check"><input type="checkbox" id="only-inst" ${s.onlySameVersion ? 'checked' : ''} ${s.source === 'hangar' || s.source === 'link' || src.platform === 'rust' ? 'disabled' : ''}> Только версия выбранной сборки</label>
       <select class="input" id="target-inst" style="min-width:260px" ${s.source === 'hangar' ? 'disabled' : ''}>
-        ${state.instances.map(i => `<option value="${esc(i.id)}" ${i.id === state.selected ? 'selected' : ''}>${esc(i.name)} · ${esc(i.version)} · ${esc(LOADER_LABEL[i.loader])}</option>`).join('') || '<option>Нет сборок</option>'}
+        ${state.instances.map(i => `<option value="${esc(i.id)}" ${i.id === state.selected ? 'selected' : ''}>${esc(i.name)} · ${esc(i.version)} · ${esc(loaderName(i))}</option>`).join('') || '<option>Нет сборок</option>'}
       </select>
     </div>
     ${cfWarn}
     ${SOURCE_HINTS[s.source] ? `<div class="hint" style="margin-bottom:14px">${esc(SOURCE_HINTS[s.source])}</div>` : ''}
-    ${s.source === 'link' ? linkPanel() : `
-    ${loaderWarn || ''}
-    <div class="toolbar" ${loaderWarn ? 'style="display:none"' : ''}>
-      <div class="search-box">
-        ${icon('search')}
-        <input class="input" id="search-q" placeholder="Поиск: sodium, JEI, Better Minecraft…" value="${esc(s.query)}">
-      </div>
-    </div>
-    <div id="results" ${loaderWarn ? 'style="display:none"' : ''}></div>`}
-    ${inst && s.source !== 'hangar' && s.source !== 'link' && !loaderWarn ? `<div class="hint" style="margin-top:14px">Установка в «${esc(inst.name)}» (Minecraft ${esc(inst.version)}, ${esc(loaderName(inst))})${sameVer ? '' : '. Фильтр по версии выключен, проверяйте совместимость'}. Каждая сборка из этого списка создаёт новую сборку автоматически.</div>` : ''}`;
+    ${s.source === 'link' ? linkPanel() : `${blocked || ''}${searchArea}`}
+    ${inst && s.source !== 'hangar' && s.source !== 'link' && !blocked ? `<div class="hint" style="margin-top:14px">${where}.${verNote}${platformHint}${s.kind === 'modpack' ? ' Каждая сборка из этого списка создаёт новую сборку автоматически.' : ''}</div>` : ''}`;
 }
 
 function linkPanel() {
@@ -771,6 +937,7 @@ function itemCard(it, idx) {
         <div style="min-width:0"><h4>${esc(it.title)}</h4><div class="by">${esc(it.author || '')}</div></div>
       </div>
       <p>${esc(it.description || '')}</p>
+      ${it.meta ? `<div class="hint" style="margin:-2px 0 10px">${esc(it.meta)}</div>` : ''}
       <div class="foot">
         <span class="dl">${it.downloads != null ? fmt(it.downloads) + ' загрузок' : ''}</span>
         <button class="btn small" data-act="open-web" data-idx="${idx}" title="Открыть страницу">${icon('ext')}</button>
@@ -849,8 +1016,12 @@ async function runSearch(fresh = true) {
   const s = state.search;
   if (s.source === 'link') return;
   const inst = selectedInst();
-  const needLoader = s.kind === 'mod' && (s.source === 'modrinth' || s.source === 'curseforge' || s.source === 'github');
-  if (needLoader && !hasLoader(inst)) {
+  const src = SOURCES.find(x => x.id === s.source) || { platform: 'java' };
+  const rustSource = src.platform === 'rust';
+  const needLoader = !rustSource && s.kind === 'mod' && (s.source === 'modrinth' || s.source === 'curseforge' || s.source === 'github');
+  // Моды .hmod не ищутся, пока выбрана Java-сборка: их всё равно некуда ставить
+  const wrongPlatform = rustSource && !!inst && !isRust(inst);
+  if ((needLoader && !hasLoader(inst)) || wrongPlatform) {
     s.items = []; s.hasMore = false; s.error = ''; s.loading = false;
     renderResults();
     return;
@@ -863,13 +1034,13 @@ async function runSearch(fresh = true) {
   }
   const seq = s.seq;
   s.loading = true;
-  const useInst = s.onlySameVersion && inst && s.source !== 'hangar' && s.source !== 'github';
-  // Фильтр загрузчика: только для модов. Для сборок и ресурспаков он не нужен.
+  const useInst = !rustSource && s.onlySameVersion && inst && s.source !== 'hangar' && s.source !== 'github';
+  // Фильтр загрузчика: только для модов Java Edition. Rust-реестр знает только версию игры движка.
   const opts = {
     query: s.query,
     kind: s.kind,
     gameVersion: useInst ? inst.version : undefined,
-    loader: s.kind === 'mod' && hasLoader(inst) ? inst.loader : undefined,
+    loader: !rustSource && s.kind === 'mod' && hasLoader(inst) ? inst.loader : undefined,
     offset: s.items.length,
   };
   if (!fresh) {
@@ -937,6 +1108,86 @@ async function installItem(idx) {
     state.progress = null;
     renderBusy();
   }
+}
+
+/* ================= Minecraft на Rust ================= */
+
+function rustCard(r) {
+  const p = RUST_PLATFORMS.find(x => x.id === r.id) || { label: r.label };
+  const latest = r.latest;
+  const engines = (r.engines || []).slice(0, 4);
+  return `
+  <div class="card">
+    <div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div>
+        <h3 style="margin-bottom:2px">${icon('bolt')} ${esc(r.label)}</h3>
+        <div class="hint">Minecraft ${esc(r.game)} · ${r.mods ? 'свой реестр модов' : 'без модов'}</div>
+      </div>
+      <span class="tag ${r.mods ? 'fab' : ''}">Rust</span>
+    </div>
+    <p class="page-sub" style="margin:10px 0 12px">${esc(r.note || '')}</p>
+    ${r.error ? `<div class="note warn" style="margin-bottom:10px">${esc(r.error)}</div>` : ''}
+    ${latest ? `<div class="hint" style="margin-bottom:8px">Последняя версия: <b>${esc(latest.tag)}</b> · ${esc(new Date(latest.publishedAt).toLocaleDateString('ru-RU'))}${latest.prerelease ? ' · тест' : ''}</div>` : ''}
+    ${engines.length
+      ? `<div style="margin-bottom:12px">${engines.map(e => `
+          <div class="row" style="gap:8px;align-items:center;margin-bottom:6px">
+            <span class="tag fab">${esc(e.tag)}</span>
+            <span class="hint grow">${e.prepared ? 'данные игры готовы' : (r.id === 'horizon' ? 'данные игры не подготовлены — подготовятся при первом запуске' : 'готов к запуску')}</span>
+            <button class="btn small" data-act="rust-open-file" data-path="${esc(e.path)}">${icon('folder')} Папка</button>
+          </div>`).join('')}</div>`
+      : '<div class="hint" style="margin-bottom:12px">Движок ещё не скачан: загрузится при первом запуске.</div>'}
+    <div class="row">
+      <button class="btn primary" data-act="rust-new" data-platform="${r.id}">${icon('plus')} Создать сборку</button>
+      <button class="btn" data-act="rust-prepare" data-platform="${r.id}" data-tag="${latest ? esc(latest.tag) : ''}">${icon('download')} Скачать движок</button>
+      <button class="btn" data-act="rust-site" data-url="${esc(r.site)}">${icon('ext')} Сайт</button>
+    </div>
+  </div>`;
+}
+
+function viewRust() {
+  const list = state.rustInfo;
+  const rows = list === null
+    ? '<div class="empty" style="grid-column:1/-1">Загружаю платформы…</div>'
+    : !list.length
+      ? `<div class="note warn" style="grid-column:1/-1">${esc(state.rustError || 'Не удалось получить данные GitHub')}</div>`
+      : list.map(rustCard).join('');
+  const horizon = (list || []).find(r => r.id === 'horizon');
+  return `
+    <h1 class="page-title">Minecraft на Rust</h1>
+    <p class="page-sub">Отдельные движки: Minecraft Java Edition 26.3, переписанный на Rust. Это не загрузчик и не мод к Java-версии — своя папка, свой запуск и свои моды.</p>
+    <div class="grid-2">${rows}</div>
+    <div class="spacer"></div>
+    <div class="card">
+      <h3>Платформы модов только для Minecraft на Rust</h3>
+      <p class="page-sub" style="margin:6px 0 12px">Java-моды (.jar) здесь не работают. У Horizon свой реестр проверенных модов: .hmod и нативные .hnmod, сборки .hpack и ресурспаки. Каждый файл сверяется по SHA-256, снятые с публикации не ставятся. Шейдерпаки (.hshader) кладутся в папку сборки shaderpacks и выбираются в игре.</p>
+      <div class="row">
+        <button class="btn primary" data-act="rust-registry">${icon('puzzle')} Реестр Horizon</button>
+        <button class="btn" data-act="rust-new" data-platform="horizon">${icon('plus')} Сборка Horizon</button>
+      </div>
+      <div class="hint" style="margin-top:12px">Второй источник — «Rust: GitHub» в разделе «Моды и сборки»: .hmod из релизов GitHub, которых ещё нет в реестре. Такие файлы не проверены.</div>
+    </div>
+    <div class="spacer"></div>
+    <div class="card">
+      <h3>Что нужно знать</h3>
+      <ul class="hint" style="margin:8px 0 0;padding-left:18px;line-height:1.7">
+        <li>Нужна своя копия Minecraft Java Edition ${esc(horizon ? horizon.game : '26.3')}: движок берёт из неё ресурсы и звуки.</li>
+        <li>Horizon один раз готовит данные игры (JDK 25 лаунчер скачает сам), после этого игра запускается без Java.</li>
+        <li>Rustcraft — клиент вместо <span class="mono">java.exe</span>: запускается из сборки, но модов не поддерживает.</li>
+        <li>Аккаунт Ely.by для Rust-сборок не нужен. Worlds и настройки лежат в папке своей сборки.</li>
+      </ul>
+    </div>`;
+}
+
+async function loadRustPage(fresh = false) {
+  if (state.rustInfo && !fresh) return;
+  try {
+    state.rustInfo = await window.ember.rust.info();
+    state.rustError = '';
+  } catch (e) {
+    state.rustInfo = state.rustInfo || [];
+    state.rustError = e.message;
+  }
+  if (state.view === 'rust') renderView();
 }
 
 /* ================= Скриншоты ================= */
@@ -1017,7 +1268,7 @@ const PERF_LABEL = { standard: 'Обычный', optimized: 'Оптимизир�
 const PERF_DESC = {
   standard: 'Лаунчер ничего не меняет: ваши настройки Minecraft и JVM остаются как есть.',
   optimized: 'Дистанция прорисовки 10, умеренные частицы, до 120 FPS, пакет модов-оптимизаторов.',
-  potato: 'Для слабых ПК: дистанция 4, быстрая графика без теней и облаков, 60 FPS, SerialGC и лёгкий JIT, пакет модов-оптимизаторов. Память задаёт ползунок в Настройках.',
+  potato: 'Для слабых ПК: дистанция 4, быстрая графика без теней и облаков, 60 FPS, стабильный G1-сборщик мусора, пакет модов-оптимизаторов. Память задаёт ползунок в Настройках.',
 };
 
 function viewSettings() {
@@ -1029,7 +1280,7 @@ function viewSettings() {
       <div class="lbl"><b>${label}</b><span>${desc}</span></div>
       <label class="toggle"><input type="checkbox" id="${id}" ${checked ? 'checked' : ''}><span class="track"></span></label>
     </div>`;
-  const gcOpts = [['g1', 'G1 (рекомендуется)'], ['zgc', 'ZGC (меньше пауз, Java 17+)'], ['parallel', 'Parallel (быстрее, но с паузами)'], ['serial', 'SerialGC (для слабых ПК)'], ['none', 'Стандартный JVM']];
+  const gcOpts = [['g1', 'G1 (рекомендуется)'], ['zgc', 'ZGC (меньше пауз, Java 17+)'], ['parallel', 'Parallel (быстрее, но с паузами)'], ['serial', 'SerialGC (только для маленькой памяти)'], ['none', 'Стандартный JVM']];
   const resOpts = [[854, 480], [1280, 720], [1600, 900], [1920, 1080], [2560, 1440]];
   const presetCards = ['standard', 'optimized', 'potato'].map(p => `
       <label class="preset ${p === 'potato' ? 'potato' : ''}">
@@ -1082,6 +1333,10 @@ function viewSettings() {
         ${sw('closeOnLaunch', 'Сворачивать лаунчер после запуска', 'Окно лаунчера сворачивается, когда игра стартовала', s.closeOnLaunch)}
         ${sw('showLogOnLaunch', 'Показывать лог при запуске', 'Лог игры открывается на главной сразу после старта', s.showLogOnLaunch)}
         ${sw('animations', 'Анимации интерфейса', 'Выключите, если лаунчер тормозит на слабом ПК', s.animations)}
+        <div class="field"><label>Ник в Minecraft на Rust</label>
+          <input class="input" id="rustname" placeholder="Игрок" maxlength="16" value="${esc(s.rustPlayerName || '')}">
+          <div class="hint">Подставляется при запуске Horizon и Rustcraft. Пусто — ник придумает сам движок. На Java-сборки не влияет.</div>
+        </div>
       </div>
       <div class="card">
         <h3>Источники модов</h3>
@@ -1209,6 +1464,7 @@ async function saveSettings() {
     animations: $('#animations').checked,
     curseforgeKey: $('#cfkey').value.trim(),
     githubToken: $('#ghtoken').value.trim(),
+    rustPlayerName: ($('#rustname').value.trim() || '').slice(0, 16),
     perf: {
       preset: currentPreset(),
       installMods: $('#perf-mods').checked,
@@ -1239,6 +1495,7 @@ async function saveSettings() {
 async function applyPerf() {
   const inst = selectedInst();
   if (!inst) return toast('Выберите сборку во вкладке «Сборки»', 'err');
+  if (isRust(inst)) return toast('Пресеты производительности — для Java Edition: у Rust-движков свои настройки графики в игре', 'err');
   const preset = currentPreset();
   if (preset === 'standard') return toast('Пресет «Обычный» ничего не меняет', 'ok');
   try {
@@ -1252,6 +1509,7 @@ async function applyPerf() {
 async function installPerfPack() {
   const inst = selectedInst();
   if (!inst) return toast('Выберите сборку во вкладке «Сборки»', 'err');
+  if (isRust(inst)) return toast('Пакет оптимизации — это Java-моды. У Horizon и Rustcraft собственный движок, оптимизировать нечего', 'err');
   if (inst.loader === 'vanilla') return toast('В Vanilla моды не ставятся. Создайте сборку с Fabric, Quilt, Forge или NeoForge', 'err');
   state.progress = { stage: 'Оптимизация', text: 'Начинаю…' };
   renderBusy();
@@ -1289,7 +1547,8 @@ async function reloadInstances() {
 async function launch() {
   const inst = selectedInst();
   if (!inst) return toast('Создайте сборку во вкладке «Сборки»', 'err');
-  if (!state.account) return toast('Войдите в аккаунт во вкладке «Аккаунт»', 'err');
+  // Rust-движки не используют аккаунт Ely.by: Horizon входит сам, Rustcraft берёт оффлайн-ник
+  if (!isRust(inst) && !state.account) return toast('Войдите в аккаунт во вкладке «Аккаунт»', 'err');
   state.preparing = true;
   renderView();
   try {
@@ -1388,6 +1647,28 @@ document.addEventListener('click', async e => {
     renderView();
     return runSearch(true);
   }
+  const platEl = e.target.closest('[data-platform]');
+  if (platEl && state.modal && state.modal.type === 'new') {
+    syncModal();
+    const next = platEl.dataset.platform;
+    if (next === 'java') {
+      state.modal.platform = 'java';
+      state.modal.loader = 'fabric';
+      state.modal.loaderVersion = '';
+      state.modal.version = state.modal.version || releaseId();
+      renderModal();
+      return ensureLoaderList('fabric', state.modal.version);
+    }
+    const p = RUST_PLATFORMS.find(x => x.id === next) || RUST_PLATFORMS[0];
+    const info = (state.rustInfo || []).find(x => x.id === p.id) || {};
+    state.modal.platform = p.id;
+    state.modal.loader = p.id;
+    state.modal.loaderVersion = '';
+    state.modal.version = info.game || p.game;
+    state.modal.gameVersion = state.modal.version;
+    renderModal();
+    return ensureRustList(p.id);
+  }
   const loaderEl = e.target.closest('[data-loader]');
   if (loaderEl && state.modal && state.modal.type === 'new') {
     syncModal();
@@ -1435,7 +1716,10 @@ document.addEventListener('click', async e => {
         return renderView();
       case 'open-inst': return window.ember.instances.open(t.dataset.id);
       case 'mods-manager': return openModsManager(t.dataset.id);
-      case 'mods-open-folder': return window.ember.instances.folder(t.dataset.id, 'mods');
+      case 'mods-open-folder': {
+        const inst = state.instances.find(i => i.id === t.dataset.id);
+        return window.ember.instances.folder(t.dataset.id, isRust(inst) ? 'horizon-mods' : 'mods');
+      }
       case 'mod-del': {
         const file = t.dataset.file;
         if (!confirm(`Удалить мод ${file}?`)) return;
@@ -1467,12 +1751,49 @@ document.addEventListener('click', async e => {
       }
       case 'new-inst': return openNewInstance('fabric');
       case 'new-inst-loader': return openNewInstance(t.dataset.loader);
+      case 'rust-new': return openRustInstance(t.dataset.platform || 'horizon');
+      case 'go-rust': return setView('rust');
+      case 'rust-registry': {
+        const inst = selectedInst();
+        state.search.source = 'horizon';
+        state.search.kind = 'mod';
+        setView('mods');
+        if (inst && !isRust(inst)) toast('Выбрана Java-сборка: показан только список модов, установить их можно в сборку Horizon', 'err');
+        return;
+      }
+      case 'rust-prepare': {
+        const platform = t.dataset.platform;
+        const tag = t.dataset.tag || '';
+        t.disabled = true;
+        state.progress = { stage: 'Minecraft Rust', text: 'Проверяю движок…' };
+        renderBusy();
+        try {
+          const r = await window.ember.rust.prepare(platform, tag);
+          toast(`${platform === 'horizon' ? 'Horizon' : 'Rustcraft'} ${r.tag} готов`, 'ok');
+          await loadRustPage(true);
+        } catch (e) {
+          toast(e.message, 'err');
+        } finally {
+          state.progress = null;
+          renderBusy();
+          t.disabled = false;
+        }
+        return;
+      }
+      case 'rust-open-file': return window.ember.showFile(t.dataset.path);
+      case 'rust-site': return window.ember.openUrl(t.dataset.url);
       case 'create-inst': {
         syncModal();
         const m = state.modal;
         const name = $('#ni-name').value.trim() || 'Новая сборка';
+        const platform = m.platform || 'java';
         const created = await window.ember.instances.create({
-          name, version: m.version, loader: m.loader, loaderVersion: m.loaderVersion || '', cover: m.cover || null,
+          name,
+          platform,
+          version: platform === 'java' ? m.version : (m.gameVersion || m.version),
+          loader: platform === 'java' ? m.loader : platform,
+          loaderVersion: m.loaderVersion || '',
+          cover: m.cover || null,
         });
         state.modal = null;
         renderModal();
@@ -1760,6 +2081,11 @@ async function boot() {
   state.runningId = r.runningId;
   const st = await window.ember.game.status();
   state.running = st.running;
+  // Платформы Rust нужны модалке новой сборки: грузим в фоне, интерфейс не ждёт
+  window.ember.rust.info().then(list => {
+    state.rustInfo = list;
+    if (state.view === 'rust') renderView();
+  }).catch(() => {});
   setupEvents();
   renderShell();
   renderView();

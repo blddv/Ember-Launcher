@@ -13,6 +13,8 @@ const instances = require('./src/instances');
 const mods = require('./src/mods');
 const installed = require('./src/installed');
 const loaders = require('./src/loaders');
+const rust = require('./src/rust');
+const horizon = require('./src/horizon');
 const perf = require('./src/perf');
 const http = require('./src/http');
 const crash = require('./src/crash');
@@ -80,7 +82,7 @@ function openCrashWindow() {
     minWidth: 720,
     minHeight: 480,
     backgroundColor: '#050B1A',
-    title: 'Minecraft закрылся с ошибкой',
+    title: crashInfo && crashInfo.engine ? `${crashInfo.engine} закрылся с ошибкой` : 'Minecraft закрылся с ошибкой',
     icon: path.join(__dirname, 'assets', 'icon.png'),
     show: false,
     webPreferences: {
@@ -140,12 +142,72 @@ async function launchFlow(instanceId) {
   stopRequested = false;
   logBuffer = [];
   let inst = instances.find(instanceId);
+  const platform = instances.platformOf(inst);
+  const rustInstance = platform !== 'java';
   let account = store.get('account');
-  if (!account) throw new Error('Сначала выберите аккаунт во вкладке «Аккаунт»');
+  // Java Edition без аккаунта не запустится. Minecraft на Rust обходится без Ely.by:
+  // Horizon входит сам, Rustcraft получает оффлайн-профиль.
+  if (!rustInstance && !account) throw new Error('Сначала выберите аккаунт во вкладке «Аккаунт»');
   running = { instanceId, proc: null, startedAt: 0 };
-  send('game:state', { running: true, instanceId });
+  send('game:state', { running: true, instanceId, platform });
+
+  // Игра закрылась: считаем время, сообщаем интерфейсу и при падении открываем разбор
+  const finish = code => {
+    const startedAt = running && running.startedAt ? running.startedAt : 0;
+    const ms = startedAt ? Date.now() - startedAt : 0;
+    if (ms > 0) instances.addPlaytime(instanceId, ms);
+    const wasStopped = stopRequested;
+    stopRequested = false;
+    running = null;
+    send('game:state', { running: false, instanceId, code, playMs: ms, platform });
+    if (!wasStopped) {
+      handleUnexpectedExit({ instanceId, code, startedAt, playMs: ms, logLines: logBuffer.slice() })
+        .catch(e => console.error('Разбор падения:', e));
+    }
+  };
 
   try {
+    if (rustInstance) {
+      const s = store.get();
+      send('mod:status', {
+        active: false,
+        reason: platform === 'horizon' ? 'моды ставятся из реестра Horizon' : 'Rustcraft без модов',
+      });
+      report({ stage: platform === 'horizon' ? 'Horizon' : 'Rustcraft', text: `Подготовка Minecraft ${inst.version}…` });
+      let proc;
+      if (platform === 'rustcraft') {
+        // Rustcraft работает как замена java.exe: те же аргументы игры, другой исполняемый файл
+        const acc = account || auth.offlineAccount((store.get('rustPlayerName') || 'Player'));
+        const bin = await rust.javaExecBin(inst, report, t => { pushLog(t); send('log', t); });
+        proc = await minecraft.launch({
+          instance: inst,
+          account: acc,
+          report,
+          bin,
+          ram: s.ram || 4096,
+          width: s.width || 1280,
+          height: s.height || 720,
+          fullscreen: !!s.fullscreen,
+          onLog: t => { pushLog(t); send('log', t); },
+          onExit: finish,
+        });
+      } else {
+        proc = await rust.launch({
+          instance: inst,
+          report,
+          onLog: t => { pushLog(t); send('log', t); },
+          onExit: finish,
+        });
+      }
+      running.proc = proc;
+      running.startedAt = Date.now();
+      if (proc.rustEngine && proc.rustEngine.tag && proc.rustEngine.tag !== inst.loaderVersion) {
+        instances.update(instanceId, { loaderVersion: proc.rustEngine.tag });
+      }
+      if (s.closeOnLaunch && win) setTimeout(() => win && win.minimize(), 1500);
+      return { ok: true, showLog: !!s.showLogOnLaunch };
+    }
+
     account = await auth.ensureAccount(account);
     const s = store.get();
 
@@ -173,19 +235,7 @@ async function launchFlow(instanceId) {
       height: s.height || 720,
       fullscreen: !!s.fullscreen,
       onLog: t => { pushLog(t); send('log', t); },
-      onExit: code => {
-        const startedAt = running && running.startedAt ? running.startedAt : 0;
-        const ms = startedAt ? Date.now() - startedAt : 0;
-        if (ms > 0) instances.addPlaytime(instanceId, ms);
-        const wasStopped = stopRequested;
-        stopRequested = false;
-        running = null;
-        send('game:state', { running: false, instanceId, code, playMs: ms });
-        if (!wasStopped) {
-          handleUnexpectedExit({ instanceId, code, startedAt, playMs: ms, logLines: logBuffer.slice() })
-            .catch(e => console.error('Разбор падения:', e));
-        }
-      },
+      onExit: finish,
     });
     running.proc = proc;
     running.startedAt = Date.now();
@@ -280,6 +330,8 @@ function bootstrap() {
     platform: process.platform,
     bundledMod: mods.SUPPORTED_VERSIONS,
     loaders: instances.LOADERS,
+    javaLoaders: instances.JAVA_LOADERS,
+    rustPlatforms: rust.list(),
   }));
 
   ipcMain.handle('dataDir:change', async () => {
@@ -305,6 +357,20 @@ function bootstrap() {
 
   ipcMain.handle('versions:list', () => minecraft.listVersions());
   ipcMain.handle('loader:versions', (_e, { loader, mc }) => loaders.listLoaderVersions(loader, mc));
+
+  // Minecraft на Rust: версии движка, состояние и разовая подготовка данных игры
+  ipcMain.handle('rust:platforms', () => rust.list());
+  ipcMain.handle('rust:releases', (_e, { platform, fresh }) => rust.listReleases(platform, { fresh: !!fresh }));
+  ipcMain.handle('rust:info', () => rust.info());
+  ipcMain.handle('rust:prepare', async (_e, { platform, tag }) => {
+    const p = rust.platform(platform);
+    if (!p) throw new Error('Неизвестная Rust-платформа');
+    report({ stage: p.label, text: 'Проверяю движок…' });
+    const engine = await rust.ensureEngine(p.id, tag || '', report, t => { pushLog(t); send('log', t); });
+    if (p.prepare) await rust.ensurePrepared(p, engine, report, t => { pushLog(t); send('log', t); });
+    report({ stage: 'Готово', text: `${p.label} готов к запуску` });
+    return { ok: true, tag: engine.tag, dir: engine.dir };
+  });
 
   ipcMain.handle('instances:list', () => ({
     list: instances.list(),
@@ -393,16 +459,31 @@ function bootstrap() {
     return shell.openPath(target);
   });
 
-  ipcMain.handle('mods:list', (_e, id) => mods.listMods(instances.find(id)));
-  ipcMain.handle('mods:toggle', (_e, { id, file, enabled }) => mods.setModEnabled(instances.find(id), file, enabled));
-  ipcMain.handle('mods:installed', (_e, id) => installed.keysFor(instances.find(id)));
+  ipcMain.handle('mods:list', (_e, id) => {
+    const inst = instances.find(id);
+    return instances.isRust(inst) ? horizon.listMods(inst) : mods.listMods(inst);
+  });
+  ipcMain.handle('mods:toggle', (_e, { id, file, enabled }) => {
+    const inst = instances.find(id);
+    return instances.isRust(inst)
+      ? horizon.setModEnabled(inst, file, enabled)
+      : mods.setModEnabled(inst, file, enabled);
+  });
+  ipcMain.handle('mods:installed', (_e, id) => {
+    const inst = instances.find(id);
+    // У сборок на Rust список ключей ведёт реестр Horizon, разбор jar не нужен
+    return instances.isRust(inst) ? [] : installed.keysFor(inst);
+  });
   // Состояние результатов поиска в сборке: { 'modrinth:ID': 'current' | 'outdated' | 'none' }
   ipcMain.handle('mods:states', (_e, { id, items }) => {
     let inst = null;
     try { inst = instances.find(id); } catch (_) { inst = null; }
     return providers.installStates(inst, items);
   });
-  ipcMain.handle('mods:delete', (_e, { id, file }) => mods.deleteMod(instances.find(id), file));
+  ipcMain.handle('mods:delete', (_e, { id, file }) => {
+    const inst = instances.find(id);
+    return instances.isRust(inst) ? horizon.deleteMod(inst, file) : mods.deleteMod(inst, file);
+  });
 
   ipcMain.handle('screenshots:list', () => screenshotsOf());
 

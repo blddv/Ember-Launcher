@@ -7,7 +7,7 @@ const http = require('http');
 const { Transform } = require('stream');
 const { pipeline } = require('stream/promises');
 
-const UA = 'EMBER-Launcher/2.0.6 (https://github.com/ember-launcher)';
+const UA = 'EMBER-Launcher/2.1.3 (https://github.com/ember-launcher)';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const NET_CODES = [
@@ -162,9 +162,9 @@ async function fetchJson(url, opts = {}) {
   return JSON.parse(buf.toString('utf8'));
 }
 
-function fileSha1(file) {
+function hashFile(file, algo) {
   return new Promise((resolve, reject) => {
-    const h = crypto.createHash('sha1');
+    const h = crypto.createHash(algo);
     fs.createReadStream(file)
       .on('data', d => h.update(d))
       .on('end', () => resolve(h.digest('hex')))
@@ -172,8 +172,16 @@ function fileSha1(file) {
   });
 }
 
-async function downloadFile(url, dest, { sha1, headers, onProgress, attempts = 3, overallMs = 300000, connectMs, idleMs } = {}) {
-  if (fs.existsSync(dest) && (!sha1 || (await fileSha1(dest)) === sha1)) return dest;
+function fileSha1(file) {
+  return hashFile(file, 'sha1');
+}
+
+function fileSha256(file) {
+  return hashFile(file, 'sha256');
+}
+
+async function downloadFile(url, dest, { sha1, sha256, headers, onProgress, attempts = 3, overallMs = 300000, connectMs, idleMs } = {}) {
+  if (fs.existsSync(dest) && (!sha1 || (await fileSha1(dest)) === sha1) && (!sha256 || (await fileSha256(dest)) === sha256)) return dest;
   await fsp.mkdir(path.dirname(dest), { recursive: true });
   const tmp = dest + '.part';
   let lastErr;
@@ -204,6 +212,7 @@ async function downloadFile(url, dest, { sha1, headers, onProgress, attempts = 3
         clearTimeout(overall);
       }
       if (sha1 && (await fileSha1(tmp)) !== sha1) throw new Error('контрольная сумма не совпала');
+      if (sha256 && (await fileSha256(tmp)) !== sha256) throw new Error('контрольная сумма не совпала');
       await fsp.rename(tmp, dest);
       return dest;
     } catch (e) {
@@ -230,4 +239,4 @@ async function pool(items, limit, worker) {
   return results;
 }
 
-module.exports = { fetchJson, fetchBuffer, downloadFile, fileSha1, pool, sleep, UA, humanizeError, describeNetError };
+module.exports = { fetchJson, fetchBuffer, downloadFile, fileSha1, fileSha256, pool, sleep, UA, humanizeError, describeNetError };

@@ -59,12 +59,21 @@ const WIN_CODES = {
   },
 };
 
-// Расшифровка кода выхода процесса.
-function decodeExit(code) {
+// Как называется движок сборки в текстах окна: у Minecraft на Rust нет Java
+function engineOf(inst) {
+  if (!inst) return '';
+  if (inst.platform === 'horizon' || inst.loader === 'horizon') return 'Horizon';
+  if (inst.platform === 'rustcraft' || inst.loader === 'rustcraft') return 'Rustcraft';
+  return '';
+}
+
+// Расшифровка кода выхода процесса. engine — 'Horizon', 'Rustcraft' или '' для Java.
+function decodeExit(code, engine = '') {
+  const who = engine || 'Java';
   if (code === 0) return { ok: true, raw: 0, hex: '0x00000000', title: 'Код 0: игра закрылась без ошибки', text: '', fixes: [] };
   if (code === null || code === undefined) {
     return {
-      ok: false, raw: null, hex: '', title: 'Процесс Minecraft был завершён извне',
+      ok: false, raw: null, hex: '', title: `Процесс ${engine || 'Minecraft'} был завершён извне`,
       text: 'Например, через Диспетчер задач или при выключении компьютера.', fixes: [],
     };
   }
@@ -73,8 +82,10 @@ function decodeExit(code) {
   if (WIN_CODES[u]) return { ok: false, raw: code, hex, ...WIN_CODES[u] };
   if (u === 1) {
     return {
-      ok: false, raw: code, hex, title: 'Java завершилась с общей ошибкой (код 1)',
-      text: 'Так заканчивается запуск, если Java или игра не смогли стартовать или упали с исключением. Точная причина — в отчёте и логе.',
+      ok: false, raw: code, hex, title: `${who} завершил${engine ? 'ся' : 'ась'} с общей ошибкой (код 1)`,
+      text: engine
+        ? `Так ${engine} заканчивает работу, если не смог стартовать или упал. Точная причина — в отчёте ниже.`
+        : 'Так заканчивается запуск, если Java или игра не смогли стартовать или упали с исключением. Точная причина — в отчёте и логе.',
       fixes: [],
     };
   }
@@ -93,6 +104,63 @@ function decodeExit(code) {
 
 // Правила по тексту отчёта и лога. Порядок важен: более точные выше.
 const RULES = [
+  {
+    id: 'rust-no-resources',
+    test: t => /Prepare resources with the launcher|horizon-prepare --prepare/.test(t)
+      || /(?:horizon-client|horizon-prepare).{0,200}No such file or directory/.test(t)
+      || /\.local[\\/]horizon-client/.test(t) && /No such file|not found/i.test(t),
+    title: 'Horizon не нашёл данные игры',
+    explanation: 'Движку нужны ресурсы, которые он готовит из вашей копии Minecraft 26.3. Их ещё нет или подготовка не завершилась: генератор данных упал, например из-за нехватки памяти.',
+    fixes: [
+      'Откройте вкладку «Minecraft Rust» и нажмите «Скачать движок» — подготовка продолжится с того же места',
+      'Освободите хотя бы 4 ГБ ОЗУ: генератору данных Horizon этого мало с запасом не бывает',
+      'Убедитесь, что версия 26.3 хотя бы раз скачана целиком (это делает лаунчер при подготовке)',
+    ],
+  },
+  {
+    id: 'rust-missing-lib',
+    test: t => /error while loading shared libraries|cannot open shared object file|libasound\.so|libudev\.so|libvulkan|libxkbcommon\.so/.test(t),
+    title: 'В системе нет библиотеки, которая нужна движку',
+    explanation: 'Horizon и Rustcraft — обычные программы на Rust: им нужны системные библиотеки звука и ввода. В Linux их часто нет в минимальной установке.',
+    fixes: [
+      'Linux (Debian/Ubuntu): установите libasound2, libudev1 и libxkbcommon0',
+      'Linux (Fedora/Arch): alsa-lib, systemd-libs, libxkbcommon',
+      'macOS: запустите движок один раз через Finder (правый клик → «Открыть»)',
+    ],
+  },
+  {
+    id: 'rust-gpu',
+    test: t => /(?:wgpu|Vulkan|DX12|DXGI|adapter|surface)/i.test(t)
+      && /(?:panic|error|failed|unsupported|lost)/i.test(t)
+      && /(?:wgpu|Vulkan|DX12|DXGI)/i.test(t),
+    title: 'Видеодрайвер не подошёл движку',
+    explanation: 'Horizon рисует через Vulkan (Windows/Linux) или Metal (macOS), Rustcraft — через Vulkan или DirectX 12. Старый драйвер такие запросы не выполняет.',
+    fixes: [
+      'Обновите драйвер видеокарты с сайта производителя (не через центр обновления Windows)',
+      'На старых видеокартах без Vulkan 1.2 движок не запустится: остаётся Java Edition',
+    ],
+  },
+  {
+    id: 'rust-memory',
+    test: t => /memory allocation of \d+ bytes failed|Out of memory|Killed process|Cannot allocate memory/.test(t),
+    title: 'Движку не хватило памяти',
+    explanation: 'Rust-движки держат мир в памяти целиком и на слабой машине могут не уложиться в доступную ОЗУ.',
+    fixes: [
+      'Закройте браузер и другие тяжёлые программы',
+      'Уменьшите дистанцию прорисовки в настройках игры (по умолчанию 12 чанков)',
+      'Увеличьте файл подкачки или добавьте памяти',
+    ],
+  },
+  {
+    id: 'rust-panic',
+    test: t => /thread '.*' panicked at|panicked at '|assertion failed:/.test(t),
+    title: 'Ошибка внутри движка',
+    explanation: 'Это паника самого движка, а не вашей настройки. В отчёте указан файл и строка — по ним автор исправляет ошибку.',
+    fixes: [
+      'Приложите отчёт о падении к сообщению в Discord движка — там указан точный файл',
+      'Обновите движок до последней версии: вкладка «Minecraft Rust»',
+    ],
+  },
   {
     id: 'native-oom',
     test: t => /OutOfMemoryError\s*$/m.test(t) || /MemoryUtil|nmemRealloc|nmemAlloc|memRealloc|memAlloc/.test(t) && /OutOfMemoryError/.test(t),
@@ -258,7 +326,8 @@ function buildInfo({ instance, code, startedAt, playMs, logLines, gameDir, found
   const latestLog = fs.existsSync(latestPath) ? tailLines(fs.readFileSync(latestPath, 'utf8'), 400) : '';
   const logText = [(logLines || []).slice(-400).join('\n'), latestLog].join('\n');
 
-  const exit = decodeExit(code);
+  const engine = engineOf(instance);
+  const exit = decodeExit(code, engine);
   const parsed = parseReport(reportText);
 
   // Сначала отчёт (он точнее), потом лог
@@ -274,7 +343,7 @@ function buildInfo({ instance, code, startedAt, playMs, logLines, gameDir, found
       : i);
   }
 
-  if (found.hsErr) {
+  if (found.hsErr && !engine) {
     issues.push({
       id: 'jvm-crash',
       title: 'Java аварийно завершилась',
@@ -292,6 +361,7 @@ function buildInfo({ instance, code, startedAt, playMs, logLines, gameDir, found
   return {
     instanceId: instance.id,
     instanceName: instance.name,
+    engine,
     gameDir,
     when: new Date(startedAt + (playMs || 0)).toISOString(),
     playMs: playMs || 0,
@@ -308,4 +378,4 @@ function buildInfo({ instance, code, startedAt, playMs, logLines, gameDir, found
   };
 }
 
-module.exports = { decodeExit, parseReport, diagnose, findSessionCrash, buildInfo, RULES };
+module.exports = { decodeExit, parseReport, diagnose, findSessionCrash, buildInfo, engineOf, RULES };

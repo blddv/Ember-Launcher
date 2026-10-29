@@ -20,6 +20,12 @@ contextBridge.exposeInMainWorld('ember', {
   },
   versions: () => inv('versions:list'),
   loaderVersions: (loader, mc) => inv('loader:versions', { loader, mc }),
+  rust: {
+    platforms: () => inv('rust:platforms'),
+    releases: (platform, fresh) => inv('rust:releases', { platform, fresh }),
+    info: () => inv('rust:info'),
+    prepare: (platform, tag) => inv('rust:prepare', { platform, tag }),
+  },
   instances: {
     list: () => inv('instances:list'),
     create: data => inv('instances:create', data),
