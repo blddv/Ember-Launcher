@@ -525,6 +525,41 @@ function bootstrap() {
     return true;
   });
 
+  // Microsoft: сначала возвращаем код устройства, затем ждём завершения входа в auth:msWait.
+  // Опрос идёт в фоне, так что окно с кодом можно показать сразу.
+  let msPending = null;
+  ipcMain.handle('auth:msStart', async () => {
+    if (msPending) throw new Error('Вход через Microsoft уже начат');
+    const dc = await auth.msDeviceCode();
+    let cancel = false;
+    const promise = auth.msLogin({ deviceCode: dc.device_code, interval: dc.interval }, () => cancel)
+      .then(acc => { store.set('account', acc); return acc; })
+      .finally(() => { msPending = null; });
+    // Защита от unhandled rejection, если окно закрыли, не дождавшись входа
+    promise.catch(() => {});
+    msPending = { promise, cancel: () => { cancel = true; } };
+    return {
+      userCode: dc.user_code,
+      verificationUri: dc.verification_uri || 'https://microsoft.com/link',
+      verificationUriComplete: dc.verification_uri_complete || '',
+      message: dc.message || '',
+      expiresIn: dc.expires_in || 900,
+    };
+  });
+  ipcMain.handle('auth:msWait', () => {
+    if (!msPending) throw new Error('Вход через Microsoft не начат');
+    return msPending.promise;
+  });
+  ipcMain.handle('auth:msCancel', () => {
+    if (msPending) msPending.cancel();
+    return true;
+  });
+
+  ipcMain.handle('clipboard:copy', (_e, text) => {
+    clipboard.writeText(String(text || ''));
+    return true;
+  });
+
   ipcMain.handle('search', (_e, { source, ...opts }) => providers.search(source, opts));
 
   ipcMain.handle('install', async (_e, { item, instanceId, update }) => {
