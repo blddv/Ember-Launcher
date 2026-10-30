@@ -10,7 +10,7 @@ on:
       release_tag:
         description: GitHub release tag to attach builds to
         required: true
-        default: 2.2.0
+        default: 2.2.1
 
 permissions:
   contents: write
@@ -82,7 +82,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.event.inputs.release_tag || '2.2.0' }}
+          RELEASE_TAG: ${{ github.event.inputs.release_tag || '2.2.1' }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -112,7 +112,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.event.inputs.release_tag || '2.2.0' }}
+          RELEASE_TAG: ${{ github.event.inputs.release_tag || '2.2.1' }}
         run: |
           set -euo pipefail
           cd artifacts
