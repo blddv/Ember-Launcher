@@ -7,7 +7,7 @@ const http = require('http');
 const { Transform } = require('stream');
 const { pipeline } = require('stream/promises');
 
-const UA = 'EMBER-Launcher/2.2.1 (https://github.com/ember-launcher)';
+const UA = 'EMBER-Launcher/2.2.2 (https://github.com/ember-launcher)';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const NET_CODES = [

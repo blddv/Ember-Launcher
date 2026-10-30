@@ -1,7 +1,7 @@
 {
   "name": "ember-launcher",
   "productName": "EMBER Launcher",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "description": "Minecraft launcher: Ely.by, Modrinth, CurseForge, Hangar, Minecraft на Rust (Horizon, Rustcraft)",
   "main": "main.js",
   "author": "EMBER",

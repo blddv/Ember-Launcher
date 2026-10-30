@@ -18,6 +18,7 @@ const horizon = require('./src/horizon');
 const perf = require('./src/perf');
 const http = require('./src/http');
 const crash = require('./src/crash');
+const secure = require('./src/secure');
 
 let win = null;
 let running = null; // { instanceId, proc, startedAt }
@@ -352,7 +353,12 @@ function bootstrap() {
   });
   ipcMain.handle('win:close', () => win && win.close());
 
-  ipcMain.handle('settings:get', () => store.get());
+  // Токены аккаунтов интерфейсу не отдаются: в окно уходит только ник, UUID и тип
+  ipcMain.handle('settings:get', () => {
+    const s = store.get();
+    s.account = secure.publicAccount(s.account);
+    return s;
+  });
   ipcMain.handle('settings:save', (_e, patch) => store.patch(patch));
 
   ipcMain.handle('versions:list', () => minecraft.listVersions());
@@ -512,12 +518,12 @@ function bootstrap() {
   ipcMain.handle('auth:ely', async (_e, { login, password }) => {
     const acc = await auth.elyAuthenticate(login, password);
     store.set('account', acc);
-    return acc;
+    return secure.publicAccount(acc);
   });
   ipcMain.handle('auth:offline', (_e, name) => {
     const acc = auth.offlineAccount(name);
     store.set('account', acc);
-    return acc;
+    return secure.publicAccount(acc);
   });
   ipcMain.handle('auth:logout', async () => {
     await auth.elyLogout(store.get('account'));
@@ -546,9 +552,9 @@ function bootstrap() {
       expiresIn: dc.expires_in || 900,
     };
   });
-  ipcMain.handle('auth:msWait', () => {
+  ipcMain.handle('auth:msWait', async () => {
     if (!msPending) throw new Error('Вход через Microsoft не начат');
-    return msPending.promise;
+    return secure.publicAccount(await msPending.promise);
   });
   ipcMain.handle('auth:msCancel', () => {
     if (msPending) msPending.cancel();
