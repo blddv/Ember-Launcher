@@ -1296,8 +1296,8 @@ function viewAccount() {
 const PERF_LABEL = { standard: 'Обычный', optimized: 'Оптимизировано', potato: 'Очень оптимизировано' };
 const PERF_DESC = {
   standard: 'Лаунчер ничего не меняет: ваши настройки Minecraft и JVM остаются как есть.',
-  optimized: 'Дистанция прорисовки 10, умеренные частицы, до 120 FPS, пакет модов-оптимизаторов.',
-  potato: 'Для слабых ПК: дистанция 4, быстрая графика без теней и облаков, 60 FPS, стабильный G1-сборщик мусора, пакет модов-оптимизаторов. Память задаёт ползунок в Настройках.',
+  optimized: 'Дистанция прорисовки 10, умеренные частицы, до 120 FPS, пакет модов-оптимизаторов с Iris и встроенными шейдерами.',
+  potato: 'Для слабых ПК: дистанция 4, быстрая графика без теней и облаков, 60 FPS, стабильный G1-сборщик мусора, пакет модов-оптимизаторов с Iris и встроенными шейдерами. Память задаёт ползунок в Настройках.',
 };
 
 function viewSettings() {
@@ -1546,7 +1546,8 @@ async function installPerfPack() {
     const r = await window.ember.perf.installPack(inst.id);
     const errText = r.errors && r.errors.length ? `, ошибок: ${r.errors.length}` : '';
     const noVer = r.unavailable && r.unavailable.length ? `, нет для этой версии: ${r.unavailable.length}` : '';
-    toast(`Установлено модов: ${r.installed.length}, уже были: ${r.skipped.length}${noVer}${errText}`, errText ? 'err' : 'ok');
+    const shText = r.shaders ? `, шейдеры: ${r.shaders}` : '';
+    toast(`Установлено модов: ${r.installed.length}, уже были: ${r.skipped.length}${shText}${noVer}${errText}`, errText ? 'err' : 'ok');
   } catch (e) {
     toast(e.message, 'err');
   } finally {
