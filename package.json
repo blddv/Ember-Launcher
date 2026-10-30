@@ -1,17 +1,20 @@
 {
   "name": "ember-launcher",
   "productName": "EMBER Launcher",
-  "version": "2.0.6",
-  "description": "Minecraft launcher: Ely.by, Modrinth, CurseForge, Hangar",
+  "version": "2.2.2",
+  "description": "Minecraft launcher: Ely.by, Modrinth, CurseForge, Hangar, Minecraft на Rust (Horizon, Rustcraft)",
   "main": "main.js",
   "author": "EMBER",
+  "homepage": "https://github.com/ember-launcher",
   "license": "SEE LICENSE IN LICENSE",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win --x64"
+    "dist": "electron-builder --win --x64",
+    "dist:linux": "electron-builder --linux --x64",
+    "dist:mac": "electron-builder --mac"
   },
   "dependencies": {
-    "adm-zip": "^0.5.16"
+    "adm-zip": "^0.5.18"
   },
   "devDependencies": {
     "electron": "31.7.7",
@@ -36,6 +39,10 @@
       {
         "from": "mods",
         "to": "mods"
+      },
+      {
+        "from": "shaders",
+        "to": "shaders"
       }
     ],
     "win": {
@@ -55,6 +62,55 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "EMBER Launcher"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "tar.gz",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "category": "Game",
+      "synopsis": "Minecraft launcher: Microsoft, Ely.by, Modrinth, CurseForge, Minecraft на Rust",
+      "maintainer": "EMBER",
+      "artifactName": "EMBER-Launcher-${version}-${os}-${arch}.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "category": "public.app-category.games",
+      "identity": null,
+      "artifactName": "EMBER-Launcher-${version}-mac-${arch}.${ext}"
     }
   }
 }

@@ -1,0 +1,123 @@
+name: Build all platforms
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/build-all.yml
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: GitHub release tag to attach builds to
+        required: true
+        default: 2.2.2
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            cmd: npx electron-builder --win --x64 --publish never
+            artifact: dist/*.exe
+            name: windows-setup
+          - os: ubuntu-latest
+            cmd: npx electron-builder --linux --x64 --publish never
+            artifact: |
+              dist/*.AppImage
+              dist/*.deb
+              dist/*.tar.gz
+            name: linux
+          - os: macos-latest
+            cmd: npx electron-builder --mac --publish never
+            artifact: |
+              dist/*.zip
+              dist/*.dmg
+            name: macos
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        shell: bash
+        run: |
+          set -o pipefail
+          ${{ matrix.cmd }} 2>&1 | tee dist-log.txt
+
+      - name: Report failure details
+        if: failure()
+        shell: bash
+        run: |
+          echo "::error::$(tail -c 3500 dist-log.txt | tr '\n' ' | ')"
+          {
+            echo "## Build log tail"
+            echo '```'
+            tail -n 50 dist-log.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep builds as workflow artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: EMBER-Launcher-${{ matrix.name }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: ignore
+
+      - name: Attach builds to GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.inputs.release_tag || '2.2.2' }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=( ${{ matrix.artifact }} )
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No release files matched for ${{ matrix.name }}" >&2
+            exit 1
+          fi
+          printf 'Uploading to %s:\n' "$RELEASE_TAG"
+          printf '  %s\n' "${files[@]}"
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+
+  checksums:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download platform builds
+        uses: actions/download-artifact@v4
+        with:
+          pattern: EMBER-Launcher-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate and attach SHA-256 checksums
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.inputs.release_tag || '2.2.2' }}
+        run: |
+          set -euo pipefail
+          cd artifacts
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' -print0 \
+            | sort -z \
+            | xargs -0 sha256sum > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          gh release upload "$RELEASE_TAG" SHA256SUMS.txt --clobber

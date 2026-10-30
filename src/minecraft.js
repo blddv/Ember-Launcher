@@ -4,7 +4,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const AdmZip = require('adm-zip');
 const { dirs } = require('./paths');
-const { fetchJson, downloadFile, pool } = require('./http');
+const { fetchJson, fetchBuffer, downloadFile, fileSha1, pool } = require('./http');
 const { ensureJava } = require('./java');
 const { ensureLoaderProfile } = require('./loaders');
 
@@ -135,13 +135,20 @@ async function installVersion(id, report = () => {}) {
     const manifest = await getManifest();
     const entry = manifest.versions.find(v => v.id === id);
     if (!entry) throw new Error(`Версия ${id} не найдена в манифесте Mojang`);
+    let raw;
     try {
-      json = await fetchJson(entry.url);
+      raw = (await fetchBuffer(entry.url)).toString('utf8');
     } catch (e) {
       throw new Error(`Не удалось загрузить описание версии ${id}: ${e.message}`);
     }
+    // Пишем файл байт в байт, как у Mojang: некоторые программы (Horizon) сверяют его SHA-1
+    try {
+      json = JSON.parse(raw);
+    } catch (e) {
+      throw new Error(`Описание версии ${id} пришло повреждённым: ${e.message}`);
+    }
     await fsp.mkdir(vdir, { recursive: true });
-    await fsp.writeFile(jsonPath, JSON.stringify(json));
+    await fsp.writeFile(jsonPath, raw);
   }
 
   report({ stage: 'Клиент', text: `Minecraft ${id}` });
@@ -252,23 +259,29 @@ async function launch(opts) {
   const {
     instance, account, report = () => {}, onLog = () => {}, onExit = () => {},
     extraJvm = [], jvmArgs = '', ram = 4096, gc = 'g1', width = 1280, height = 720, fullscreen = false,
+    // Нативный клиент вместо java (Rustcraft): тот же набор аргументов, другой исполняемый файл
+    bin = null,
   } = opts;
   const mc = instance.version;
+  const nativeClient = !!bin;
 
   report({ stage: 'Minecraft', text: `Подготовка ${mc}…` });
   const vanilla = await installVersion(mc, report);
   const javaMajor = (vanilla.javaVersion && vanilla.javaVersion.majorVersion) || 8;
 
-  const { profile, loaderVersion } = await ensureLoaderProfile(instance, { report, javaMajor });
+  // У нативного клиента нет загрузчика модов и Java-библиотек: профиль и classpath не нужны
+  const { profile, loaderVersion } = nativeClient
+    ? { profile: null, loaderVersion: '' }
+    : await ensureLoaderProfile(instance, { report, javaMajor });
   const merged = mergeProfile(vanilla, profile);
   const libsAll = resolveLibraries(merged.libraries);
-  await installLibraries(libsAll, report);
+  if (!nativeClient) await installLibraries(libsAll, report);
 
   const gameDir = instance.gameDir;
   await fsp.mkdir(gameDir, { recursive: true });
   const nativesDir = path.join(dirs.versions, mc, 'natives');
   const subdirs = nativeSubdirs([...normalizeArgs(vanilla).jvm, ...normalizeArgs(merged).jvm]);
-  await extractNatives(libsAll, nativesDir, subdirs);
+  if (!nativeClient) await extractNatives(libsAll, nativesDir, subdirs);
 
   const sep = process.platform === 'win32' ? ';' : ':';
   const seen = new Set();
@@ -287,7 +300,7 @@ async function launch(opts) {
   }
   const classpath = cpLibs.join(sep);
 
-  const javaBin = await ensureJava(javaMajor, report);
+  const javaBin = nativeClient ? bin : await ensureJava(javaMajor, report);
 
   const ctx = {
     auth_player_name: account.username,
@@ -300,7 +313,7 @@ async function launch(opts) {
     auth_session: account.accessToken || '0',
     clientid: '',
     auth_xuid: '',
-    user_type: account.type === 'elyby' ? 'mojang' : 'legacy',
+    user_type: account.type === 'elyby' ? 'mojang' : account.type === 'microsoft' ? 'msa' : 'legacy',
     version_type: vanilla.type || 'release',
     natives_directory: nativesDir,
     launcher_name: LAUNCHER_NAME,
@@ -320,19 +333,22 @@ async function launch(opts) {
   if (!merged.arguments && !built.game.includes('--width')) built.game.push('--width', String(width), '--height', String(height));
   if (fullscreen) built.game.push('--fullscreen');
 
-  const userJvm = jvmArgs.split(/\s+/).filter(Boolean);
-  const args = [
-    `-Xmx${ram}M`,
-    '-Xms512M',
-    ...gcArgs(gc, javaMajor),
-    ...userJvm,
-    ...extraJvm,
-    ...built.jvm,
-    merged.mainClass,
-    ...built.game,
-  ];
+  // Нативному клиенту JVM-флаги не нужны: он не Java и разбирает только аргументы игры
+  const userJvm = nativeClient ? [] : jvmArgs.split(/\s+/).filter(Boolean);
+  const args = nativeClient
+    ? [...built.game]
+    : [
+      `-Xmx${ram}M`,
+      '-Xms512M',
+      ...gcArgs(gc, javaMajor),
+      ...userJvm,
+      ...extraJvm,
+      ...built.jvm,
+      merged.mainClass,
+      ...built.game,
+    ];
 
-  report({ stage: 'Запуск', text: 'Запускаю Minecraft…' });
+  report({ stage: 'Запуск', text: nativeClient ? 'Запускаю клиент на Rust…' : 'Запускаю Minecraft…' });
   onLog(`> ${javaBin}\n`);
   if (loaderVersion) onLog(`> загрузчик: ${loaderVersion}\n`);
   const proc = spawn(javaBin, args, { cwd: gameDir, windowsHide: true });
@@ -344,6 +360,37 @@ async function launch(opts) {
   return proc;
 }
 
+// Готовит в папке данных EMBER раскладку, которую понимает horizon-prepare
+// (--minecraft-dir): versions/<id>/ с version.json и client.jar, assets/ и libraries/.
+// Horizon сверяет SHA-1 файла версии Mojang. Старые версии EMBER пересобирали JSON
+// (и хеш переставал совпадать), поэтому перед подготовкой файл приводится к оригиналу.
+async function ensureRawVersionJson(id, report = () => {}) {
+  const vdir = path.join(dirs.versions, id);
+  const jsonPath = path.join(vdir, `${id}.json`);
+  const manifest = await getManifest();
+  const entry = manifest.versions.find(v => v.id === id);
+  if (!entry) throw new Error(`Версия ${id} не найдена в манифесте Mojang`);
+  if (fs.existsSync(jsonPath)) {
+    const have = await fileSha1(jsonPath).catch(() => null);
+    if (!entry.sha1 || have === entry.sha1) return;
+    report({ stage: 'Minecraft', text: `Обновляю описание версии ${id}…` });
+  }
+  const raw = (await fetchBuffer(entry.url)).toString('utf8');
+  JSON.parse(raw); // проверяем, что файл целый, прежде чем записывать
+  await fsp.mkdir(vdir, { recursive: true });
+  await fsp.writeFile(jsonPath, raw);
+}
+
+async function installVersionForRust(id, report = () => {}) {
+  await ensureRawVersionJson(id, report);
+  const json = await installVersion(id, report);
+  // horizon-prepare запускает генератор данных из server.jar на этой же версии Java,
+  // поэтому библиотеки версии (lz4 и прочее) должны лежать на месте
+  await installLibraries(resolveLibraries(json.libraries), report);
+  return json;
+}
+
 module.exports = {
-  listVersions, launch, getManifest, installVersion, resolveLibraries, nativeArchMatches, nativeSubdirs, mergeProfile, gcArgs,
+  listVersions, launch, getManifest, installVersion, installVersionForRust, ensureRawVersionJson,
+  resolveLibraries, nativeArchMatches, nativeSubdirs, mergeProfile, gcArgs,
 };
