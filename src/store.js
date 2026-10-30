@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { dirs } = require('./paths');
+const secure = require('./secure');
 
 const FILE = path.join(dirs.base, 'launcher.json');
 
@@ -90,13 +91,24 @@ function load() {
     data.orangeVisuals.musicFolder = raw.music.folder;
   }
   delete data.music;
+  // Аккаунт: на диске лежит только шифробъект accountSecure, в памяти — открытый.
+  // Старый формат (открытым текстом) мигрирует на шифрование сразу.
+  delete data.accountSecure;
+  if (raw.accountSecure) data.account = secure.decrypt(raw.accountSecure);
+  else if (raw.account) save();
   return data;
 }
 
 function save() {
   fs.mkdirSync(dirs.base, { recursive: true });
+  // Секреты не пишутся открытым текстом: аккаунт шифруем, токены остаются только в памяти
+  const out = { ...data };
+  delete out.account;
+  if (data.account) out.accountSecure = secure.encrypt(data.account);
   const tmp = FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
+  fs.writeFileSync(tmp, JSON.stringify(out, null, 2), 'utf8');
+  // Файл с шифробъектом — только для владельца (на POSIX)
+  try { fs.chmodSync(tmp, 0o600); } catch (_) { /* Windows */ }
   fs.renameSync(tmp, FILE);
 }
 

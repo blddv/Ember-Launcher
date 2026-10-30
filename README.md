@@ -28,6 +28,7 @@
 - **Папка данных**: в Настройках можно выбрать любую папку. Данные переносятся, лаунчер перезапускается, можно вернуть стандартную папку.
 - **Orange Visuals 1.6.0**: собственный мод. Режим для слабых ПК (меньше обновлений HUD и миникарты, без виньетки), HUD (FPS, координаты, время), миникарта с поворотом по взгляду, полная карта на **N**, метки на **B**, плавный зум на **C**, своя точка-прицел, баннер «Сейчас играет» сверху экрана, если включена музыка лаунчера. Меню мода открывается коротким нажатием **R Shift** (клавишу можно сменить в Настройках). Включается и выключается в Настройках. При выключении мод удаляется из сборок. Fabric API ставится автоматически из Modrinth.
 - **Java**: если путь не задан, лаунчер сам скачивает нужную Java (Adoptium).
+- **Безопасность аккаунтов**: токены Microsoft и Ely.by шифруются на диске через системное хранилище ключей (DPAPI на Windows, Keychain на macOS, keyring на Linux), а если его нет — ключом, привязанным к компьютеру. В интерфейс и логи токены не попадают; файл настроек доступен только владельцу.
 - **Оптимизация и шейдеры**: пресеты производительности для любого ПК («Оптимизировано», «Очень оптимизировано»). Пакет модов-оптимизаторов (Sodium, Lithium и другие) ставится в один клик вместе с **Iris** и **12 встроенными шейдерпаками** (Complementary Reimagined, Spooklementary, Koto, Pastel и другие) — они копируются в `shaderpacks` сборки и выбираются в игре в настройках Iris.
 
 ## Minecraft на Rust
@@ -65,9 +66,9 @@ npm start
 
 | Платформа | Команда | Результат |
 | --- | --- | --- |
-| Windows | `npm run dist` | `dist/EMBER Launcher Setup 2.2.1.exe` (NSIS) |
-| Linux | `npm run dist:linux` | `EMBER-Launcher-2.2.1-linux-x86_64.AppImage`, `-linux-amd64.deb`, `-linux-x64.tar.gz` |
-| macOS | `npm run dist:mac` | `EMBER-Launcher-2.2.1-mac-x64.zip` (Intel) и `EMBER-Launcher-2.2.1-mac-arm64.zip` (Apple Silicon), DMG — только на macOS |
+| Windows | `npm run dist` | `dist/EMBER Launcher Setup 2.2.2.exe` (NSIS) |
+| Linux | `npm run dist:linux` | `EMBER-Launcher-2.2.2-linux-x86_64.AppImage`, `-linux-amd64.deb`, `-linux-x64.tar.gz` |
+| macOS | `npm run dist:mac` | `EMBER-Launcher-2.2.2-mac-x64.zip` (Intel) и `EMBER-Launcher-2.2.2-mac-arm64.zip` (Apple Silicon), DMG — только на macOS |
 
 Сборка Windows-установщика на Linux требует Wine (с 32-битной частью) для редактирования ресурсов exe. Сборка DMG выполняется на macOS (или через workflow `build-all.yml` в GitHub Actions). Zip-сборки macOS без подписи: при первом запуске щёлкните правой кнопкой → «Открыть».
 

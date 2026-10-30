@@ -1262,7 +1262,7 @@ function viewAccount() {
 
   return `
     <h1 class="page-title">Аккаунт</h1>
-    <p class="page-sub">Войдите через Microsoft (официальный аккаунт), Ely.by (скины и ник) или играйте оффлайн.</p>
+    <p class="page-sub">Войдите через Microsoft (официальный аккаунт), Ely.by (скины и ник) или играйте оффлайн. Токены аккаунтов зашифрованы на диске и не отдаются интерфейсу — украсть их копией файла не получится.</p>
     ${current}
     <div class="acc-grid">
       <div class="card">
