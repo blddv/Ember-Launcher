@@ -66,9 +66,9 @@ npm start
 
 | Платформа | Команда | Результат |
 | --- | --- | --- |
-| Windows | `npm run dist` | `dist/EMBER Launcher Setup 2.2.2.exe` (NSIS) |
-| Linux | `npm run dist:linux` | `EMBER-Launcher-2.2.2-linux-x86_64.AppImage`, `-linux-amd64.deb`, `-linux-x64.tar.gz` |
-| macOS | `npm run dist:mac` | `EMBER-Launcher-2.2.2-mac-x64.zip` (Intel) и `EMBER-Launcher-2.2.2-mac-arm64.zip` (Apple Silicon), DMG — только на macOS |
+| Windows | `npm run dist` | `dist/EMBER Launcher Setup 2.2.3.exe` (NSIS) |
+| Linux | `npm run dist:linux` | `EMBER-Launcher-2.2.3-linux-x86_64.AppImage`, `-linux-amd64.deb`, `-linux-x64.tar.gz` |
+| macOS | `npm run dist:mac` | `EMBER-Launcher-2.2.3-mac-x64.zip` (Intel) и `EMBER-Launcher-2.2.3-mac-arm64.zip` (Apple Silicon), DMG — только на macOS |
 
 Сборка Windows-установщика на Linux требует Wine (с 32-битной частью) для редактирования ресурсов exe. Сборка DMG выполняется на macOS (или через workflow `build-all.yml` в GitHub Actions). Zip-сборки macOS без подписи: при первом запуске щёлкните правой кнопкой → «Открыть».
 
@@ -105,6 +105,33 @@ mods-src/            исходники мода (Fabric 1.21.1, Java 21)
 - **Rustcraft**: клиент в разработке (v0.0.1), модов не поддерживает, и для него тоже нужна версия 26.3. Запускается как замена `java.exe` — лаунчер передаёт ему аргументы обычной игры.
 - **Linux**: Horizon и Rustcraft требуют системные библиотеки (`libasound2`, `libudev1`, `libxkbcommon0`). Если их нет, окно падения подскажет, что доустановить.
 - Проверка подготовки Horizon на машине с 2 ГБ ОЗУ упирается в память генератора данных (нужно ~4 ГБ). На обычном ПК подготовка проходит целиком.
+
+## Linux / KDE Plasma: окно не реагирует на мышь, курсор пропадает
+
+Лаунчер — Electron 31 с окном без рамки (`frame: false`) и своим титульбаром. Раньше титульбар таскался через CSS `-webkit-app-region: drag`: Electron сообщает такой прямоугольник оконному менеджеру как «заголовок окна», и KWin забирает себе все mouse-события в нём (это не баг лаунчера, а контракт API: [electron#1354](https://github.com/electron/electron/issues/1354)). Под KWin (Plasma 5.27/6, Wayland и XWayland) такой нативный захват указателя может не отпуститься после клика/перетаскивания: KWin скрывает курсор на время move-grab, и клики перестают доходить **во всё окно** (см. [KDE 483494](https://bugs.kde.org/show_bug.cgi?id=483494), исправлено в Plasma 6.1, и [electron#49907](https://github.com/electron/electron/issues/49907)). Второй, независимый источник тех же симптомов — нативный Wayland-бэкенд Electron 31: события `wl_pointer` приходят в процесс, но не доставляются окну, а курсор поверхности не рисуется ([electron#49905](https://github.com/electron/electron/issues/49905), [electron#28768](https://github.com/electron/electron/issues/28768)). Часто его включают сами, прописывая `ELECTRON_OZONE_PLATFORM_HINT=auto` для чёткости шрифтов Electron-приложений.
+
+**Что сделано в коде (начиная с этой правки):**
+
+- Ярлык `.deb`/`tar.gz` (`build.linux.executableArgs`) и AppImage теперь запускаются с `--ozone-platform=x11` — рабочий для Electron 31 путь. Если процесс всё равно стартовал под Wayland (например, глобально задан `ELECTRON_OZONE_PLATFORM_HINT=auto`, который Electron обрабатывает **до** запуска JS), `main.js` один раз перезапускает лаунчер с явным `--ozone-platform=x11`. Уважается явный `--ozone-platform=...` в командной строке; вернуть Wayland можно переменной `EMBER_OZONE_PLATFORM=wayland` или `=auto` (тогда нужны Plasma с исправлениями и свежий Electron).
+- На Linux/X11 `-webkit-app-region: drag` отключён (`body.js-drag`): окно двигается из main-процесса по `screen.getCursorScreenPoint()` + `win.setPosition()`, а кнопки титульбара остаются кликабельными. Двойной клик по титульбару разворачивает окно. На Windows и macOS всё как раньше. Если перезапуск в X11 не удался и лаунчер остался под нативным Wayland, клики работают, но перетаскивать окно за титульбар не получится (`setPosition` на Wayland игнорируется) — двигайте его за рамку KWin (Alt+перетаскивание).
+
+**Если проблема уже проявилась / сборка старее:**
+
+```bash
+# проверить, какая сессия и не включён ли глобально Wayland для Electron
+echo "$XDG_SESSION_TYPE | WAYLAND_DISPLAY=$WAYLAND_DISPLAY | ELECTRON_OZONE_PLATFORM_HINT=$ELECTRON_OZONE_PLATFORM_HINT"
+
+# снять залипший захват указателя: Esc, затем Alt+Tab / клик по другому окну;
+# если не помогло — закрыть лаунчер клавиатурой (Alt+F4) и запустить заново
+
+# запустить через XWayland (для AppImage / deb-бинарника / исходников)
+./EMBER-Launcher-2.2.3-linux-x86_64.AppImage --ozone-platform=x11
+npm start -- --ozone-platform=x11
+```
+
+В KDE можно добавить `--ozone-platform=x11` в ярлык приложения (ПКМ по иконке → Свойства → Программа → аргументы) или выбрать сессию **«Plasma (X11)»** на экране входа. Если курсор исчезает не только в лаунчере, но и везде — обновите Plasma/KWin (дефект KWin 6.2.x с невидимым курсором) либо, в виртуальной машине, задайте `KWIN_FORCE_SW_CURSOR=1`. При подозрении на драйвер/GPU попробуйте `--disable-gpu`.
+
+Electron 31.7.7 (2024) уже не поддерживается; часть Wayland-багов исправлена в свежих ветках, но начиная с Electron 38 нативный Wayland стал **умолчанием** (`--ozone-platform=auto`), поэтому при обновлении движка флаг `--ozone-platform=x11` нужно сохранить. Если Wayland вам нужен сознательно: `EMBER_OZONE_PLATFORM=wayland` (добавляет `--enable-features=WaylandWindowDecorations` для рамок frameless-окна) или `EMBER_OZONE_PLATFORM=auto`.
 
 ## Лицензия
 

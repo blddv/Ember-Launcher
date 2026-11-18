@@ -1,7 +1,7 @@
 {
   "name": "ember-launcher",
   "productName": "EMBER Launcher",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "description": "Minecraft launcher: Ely.by, Modrinth, CurseForge, Hangar, Minecraft на Rust (Horizon, Rustcraft)",
   "main": "main.js",
   "author": "EMBER",
@@ -86,6 +86,7 @@
       ],
       "icon": "assets/icon.png",
       "category": "Game",
+      "executableArgs": ["--ozone-platform=x11"],
       "synopsis": "Minecraft launcher: Microsoft, Ely.by, Modrinth, CurseForge, Minecraft на Rust",
       "maintainer": "EMBER",
       "artifactName": "EMBER-Launcher-${version}-${os}-${arch}.${ext}"

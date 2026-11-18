@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('ember', {
     min: () => inv('win:min'),
     max: () => inv('win:max'),
     close: () => inv('win:close'),
+    dragStart: () => inv('win:dragStart'),
+    dragEnd: () => inv('win:dragEnd'),
   },
   settings: {
     get: () => inv('settings:get'),
