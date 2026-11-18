@@ -1722,6 +1722,38 @@ async function openModsManager(id) {
   if (state.modal && state.modal.type === 'mods') renderModal();
 }
 
+// Linux/X11 (KDE Plasma): двигаем frameless-окно сами, без CSS drag-региона.
+// Слушатели висят на document, поэтому переживают перерисовку #app.
+function setupManualWindowDrag() {
+  let dragging = false;
+  const stop = () => {
+    if (!dragging) return;
+    dragging = false;
+    window.ember.win.dragEnd().catch(() => {});
+  };
+  document.addEventListener('mousedown', e => {
+    if (e.button !== 0 || dragging) return;
+    const bar = e.target.closest && e.target.closest('.titlebar');
+    if (!bar || e.target.closest('button, a, input, select, textarea, label')) return;
+    dragging = true;
+    window.ember.win.dragStart()
+      .then(ok => {
+        // Быстрый клик: mouseup уже пришёл, пока шёл IPC — сразу снимаем захват
+        if (!ok || !dragging) {
+          dragging = false;
+          window.ember.win.dragEnd().catch(() => {});
+        }
+      })
+      .catch(() => { dragging = false; });
+  });
+  window.addEventListener('mouseup', stop);
+  window.addEventListener('blur', stop);
+  document.addEventListener('dblclick', e => {
+    const bar = e.target.closest && e.target.closest('.titlebar');
+    if (bar && !e.target.closest('button, a, input, select, textarea')) window.ember.win.max().catch(() => {});
+  });
+}
+
 function setupEvents() {
   // Broken images (недоступные скины/обложки) не показываем как «галочку» — приглушаем
   document.addEventListener('error', e => {
@@ -2385,6 +2417,15 @@ document.addEventListener('keydown', e => {
 
 async function boot() {
   state.info = await window.ember.info();
+  // Под Linux/KDE отключаем -webkit-app-region: drag и двигаем окно из main-процесса
+  if (state.info.windowDrag === 'js') {
+    document.body.classList.add('js-drag');
+    setupManualWindowDrag();
+  }
+  // Явный opt-in в нативный Wayland: на Electron 31 под KWin ввод может пропасть
+  if (state.info.ozone === 'wayland' || state.info.ozone === 'auto') {
+    toast('Запущено под Wayland: если мышь не работает, добавьте --ozone-platform=x11', 'err');
+  }
   state.settings = await window.ember.settings.get();
   await loadAccounts();
   // Каталоги скинов

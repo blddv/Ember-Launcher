@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Tray, Menu, nativeImage, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -21,7 +21,62 @@ const crash = require('./src/crash');
 const secure = require('./src/secure');
 const skins = require('./src/skins');
 
+// ===== Linux / KDE Plasma: бэкенд окна и способ его перетаскивания =====
+// Electron 31 под нативным Wayland + KWin (Plasma 6) может потерять ввод:
+// wl_pointer.motion приходит в процесс, но события не доставляются окну,
+// а указатель поверхности остаётся невидимым (electron/electron#49905,
+// #49907, #28768; bugs.kde.org/483494). Рабочий путь — X11/XWayland.
+//
+// Важно: ELECTRON_OZONE_PLATFORM_HINT обрабатывается Electron'ом в
+// DetectOzonePlatform() ещё до запуска JS, поэтому из main.js его уже не
+// переопределить. Если процесс всё-таки стартовал под Wayland, перезапускаем
+// его с явным --ozone-platform=x11. В .desktop electron-builder этот флаг
+// прописан сразу (build.linux.executableArgs), поэтому перезапуск там не нужен.
+//
+// mode: 'js' — окно двигаем сами, CSS drag-регион отключён;
+//       'native' — оставляем -webkit-app-region: drag (на Wayland
+//       win.setPosition() не работает, перетаскивание отдаём KWin).
+function detectLinuxWindowBackend() {
+  if (process.platform !== 'linux') return { mode: 'native', relaunch: null, ozone: 'native' };
+  const cliArg = process.argv.find(a => a.startsWith('--ozone-platform='));
+  const cli = cliArg ? cliArg.slice('--ozone-platform='.length) : '';
+  const env = String(process.env.EMBER_OZONE_PLATFORM || '').toLowerCase();
+
+  // Явный выбор пользователя: флаг командной строки или EMBER_OZONE_PLATFORM.
+  // Флаг из командной строки Electron уже обработал сам; переменную окружения
+  // приходится превращать в флаг перезапуском (до старта JS она не читается).
+  const restarted = process.env.EMBER_BACKEND_RELAUNCH === '1';
+  const choice = cli || env;
+  if (choice === 'wayland' || choice === 'auto') {
+    if (cli || restarted) return { mode: 'native', relaunch: null, ozone: choice };
+    const args = choice === 'auto'
+      ? ['--ozone-platform-hint=auto']
+      : ['--ozone-platform=wayland', '--enable-features=WaylandWindowDecorations'];
+    return { mode: 'native', relaunch: args, ozone: choice };
+  }
+  if (choice === 'x11') return { mode: 'js', relaunch: null, ozone: 'x11' };
+
+  // Что реально выбрал Electron до старта JS (в т.ч. по глобальному
+  // ELECTRON_OZONE_PLATFORM_HINT=auto). С Electron 38 Wayland стал умолчанием.
+  const selected = app.commandLine.getSwitchValue('ozone-platform');
+  const major = parseInt((process.versions.electron || '').split('.')[0], 10) || 0;
+  const waylandByDefault = major >= 38 && process.env.XDG_SESSION_TYPE === 'wayland';
+  if ((selected === 'wayland' || waylandByDefault) && !restarted) {
+    return { mode: 'js', relaunch: ['--ozone-platform=x11'], ozone: selected || 'auto' };
+  }
+  app.commandLine.appendSwitch('ozone-platform', 'x11');
+  return { mode: 'js', relaunch: null, ozone: 'x11' };
+}
+const LINUX_BACKEND = detectLinuxWindowBackend();
+const WINDOW_DRAG = LINUX_BACKEND.mode;
+
 let win = null;
+let windowDrag = null; // активное перетаскивание окна (Linux/X11)
+function stopWindowDrag() {
+  if (!windowDrag) return;
+  clearInterval(windowDrag.timer);
+  windowDrag = null;
+}
 let running = null; // { instanceId, proc, startedAt }
 let stopRequested = false; // игра остановлена кнопкой лаунчера, это не падение
 let logBuffer = []; // последние строки лога текущей сессии
@@ -142,7 +197,6 @@ function createWindow() {
   win.setMenuBarVisibility(false);
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.once('ready-to-show', () => win.show());
-
   // Закрытие окна, пока игра запущена: сворачиваем в трей, а не убиваем игру.
   win.on('close', e => {
     if (forceQuit) return;
@@ -152,6 +206,8 @@ function createWindow() {
       return;
     }
   });
+  // Linux/KDE (2.2.3): сбрасываем активное перетаскивание окна при его закрытии
+  win.on('closed', () => { stopWindowDrag(); win = null; });
 }
 
 // Иконка в трее: позволяет открыть лаунчер обратно и корректно выйти (убив игру).
@@ -385,6 +441,8 @@ function bootstrap() {
     base: dirs.base,
     isCustom: !!readBootstrap().dataDir,
     platform: process.platform,
+    windowDrag: WINDOW_DRAG,
+    ozone: LINUX_BACKEND.ozone,
     bundledMod: mods.SUPPORTED_VERSIONS,
     loaders: instances.LOADERS,
     javaLoaders: instances.JAVA_LOADERS,
@@ -408,6 +466,30 @@ function bootstrap() {
     win.isMaximized() ? win.unmaximize() : win.maximize();
   });
   ipcMain.handle('win:close', () => win && win.close());
+
+  // Перетаскивание без -webkit-app-region: drag (Linux/X11). Нативный регион
+  // забирает все mouse-события у страницы (electron/electron#1354), а KWin
+  // может не отпустить захват указателя: курсор скрыт, клики не доходят.
+  ipcMain.handle('win:dragStart', () => {
+    // getCursorScreenPoint() на Wayland возвращает {0,0} (electron#53794),
+    // поэтому если рестарт в X11 не удался — просто не двигаем окно.
+    if (WINDOW_DRAG !== 'js' || LINUX_BACKEND.ozone !== 'x11' || windowDrag ||
+        !win || win.isDestroyed() || win.isMaximized()) return false;
+    const start = screen.getCursorScreenPoint();
+    const bounds = win.getBounds();
+    windowDrag = { start, bounds, startedAt: Date.now(), timer: null };
+    windowDrag.timer = setInterval(() => {
+      if (!windowDrag || !win || win.isDestroyed()) return stopWindowDrag();
+      // Подстраховка: если mouseup потерялся (курсор ушёл за окно), не таскаем окно вечно
+      if (Date.now() - windowDrag.startedAt > 15000) return stopWindowDrag();
+      const p = screen.getCursorScreenPoint();
+      if (p.x === windowDrag.start.x && p.y === windowDrag.start.y) return;
+      win.setPosition(windowDrag.bounds.x + p.x - windowDrag.start.x,
+                      windowDrag.bounds.y + p.y - windowDrag.start.y);
+    }, 16);
+    return true;
+  });
+  ipcMain.handle('win:dragEnd', () => { stopWindowDrag(); return true; });
 
   // Токены аккаунтов интерфейсу не отдаются: в окно уходит только ник, UUID и тип
   ipcMain.handle('settings:get', () => {
@@ -761,6 +843,21 @@ function bootstrap() {
 }
 
 app.whenReady().then(() => {
+  // Бэкенд Ozone выбирается Electron'ом до старта JS: если нужен другой,
+  // перезапускаемся до создания окон. Флаг-страховка в окружении не даёт
+  // уйти в бесконечный рестарт.
+  if (LINUX_BACKEND.relaunch) {
+    process.env.EMBER_BACKEND_RELAUNCH = '1';
+    try {
+      app.relaunch({ args: process.argv.slice(1).concat(LINUX_BACKEND.relaunch) });
+      app.exit(0);
+      return;
+    } catch (e) {
+      // Например, AppImage не смог перезапуститься: работаем дальше без рестарта,
+      // drag-регион уже отключён, поэтому клики должны доходить и под Wayland.
+      console.error('Не удалось перезапустить лаунчер с нужным Ozone-бэкендом:', e);
+    }
+  }
   bootstrap();
   createWindow();
   createTray();
