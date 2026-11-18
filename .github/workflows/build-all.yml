@@ -20,11 +20,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Релиз 2.2.3 собирается только под Linux (запрос пользователя).
         include:
-          - os: windows-latest
-            cmd: npx electron-builder --win --x64 --publish never
-            artifact: dist/*.exe
-            name: windows-setup
           - os: ubuntu-latest
             cmd: npx electron-builder --linux --x64 --publish never
             artifact: |
@@ -32,12 +29,6 @@ jobs:
               dist/*.deb
               dist/*.tar.gz
             name: linux
-          - os: macos-latest
-            cmd: npx electron-builder --mac --publish never
-            artifact: |
-              dist/*.zip
-              dist/*.dmg
-            name: macos
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
