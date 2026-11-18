@@ -1,11 +1,17 @@
 name: Build Linux only
 
 on:
+  # Автозапуск на ветке релиза: у токена сборки нет прав на Actions API,
+  # поэтому workflow_dispatch с этой ветки недоступен.
+  push:
+    branches: [arena/0686e8c3-ember-launcher]
+    paths:
+      - .github/workflows/build-linux.yml
   workflow_dispatch:
     inputs:
       release_tag:
         description: GitHub release tag to attach builds to
-        required: true
+        required: false
         default: 2.2.3
 
 permissions:
@@ -42,7 +48,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+          RELEASE_TAG: ${{ github.event.inputs.release_tag || '2.2.3' }}
         run: |
           set -euo pipefail
           shopt -s nullglob
