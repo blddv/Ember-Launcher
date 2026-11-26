@@ -734,6 +734,7 @@ function bootstrap() {
 
   // ── Скины: каталоги, поиск, текущий скин, применение ──
   ipcMain.handle('skins:sources', () => skins.listSources());
+  ipcMain.handle('skins:catalog', () => skins.catalog());
   ipcMain.handle('skins:search', async (_e, { source, query }) => {
     const nick = typeof query === 'string' ? query : '';
     return skins.search(source, nick);
@@ -741,13 +742,13 @@ function bootstrap() {
   ipcMain.handle('skins:current', async (_e, { accountId }) => {
     const acc = store.accountById(accountId);
     if (!acc) throw new Error('Аккаунт не найден');
-    return skins.currentSkinUrl(acc);
+    return skins.currentSkin(acc);
   });
-  ipcMain.handle('skins:apply', async (_e, { accountId, file, url }) => {
+  ipcMain.handle('skins:apply', async (_e, { accountId, file, url, model }) => {
     const acc = store.accountById(accountId);
     if (!acc) throw new Error('Аккаунт не найден');
-    const result = await skins.apply(acc, { file, url });
-    return { ok: true, source: acc.type, url: result.url, message: result.message || '' };
+    const result = await skins.apply(acc, { file, url, model });
+    return { ok: true, source: acc.type, method: result.method || '', message: result.message || '' };
   });
   ipcMain.handle('skins:pickImage', async () => {
     const r = await dialog.showOpenDialog(win, {

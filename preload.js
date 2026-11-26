@@ -83,6 +83,7 @@ contextBridge.exposeInMainWorld('ember', {
   },
   skins: {
     sources: () => inv('skins:sources'),
+    catalog: () => inv('skins:catalog'),
     search: (source, query) => inv('skins:search', { source, query }),
     current: (accountId) => inv('skins:current', { accountId }),
     apply: (accountId, opts) => inv('skins:apply', { accountId, ...opts }),

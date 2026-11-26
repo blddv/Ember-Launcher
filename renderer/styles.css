@@ -160,9 +160,12 @@ body.js-drag .titlebar * { -webkit-app-region: no-drag; }
 /* ===== Скины и список аккаунтов ===== */
 .skin-preview { width: 96px; height: 96px; border-radius: 12px; image-rendering: pixelated; background: rgba(8, 18, 41, .6); border: 1px solid var(--navy-600); flex: none; }
 .img-broken { opacity: .25; filter: grayscale(1); }
+.broken-img { opacity: .25; filter: grayscale(1); }
 .skin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 14px; }
-.skin-card { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px; border-radius: 14px; background: rgba(8, 18, 41, .6); border: 1px solid var(--navy-600); }
-.skin-card img { width: 72px; height: 96px; image-rendering: pixelated; border-radius: 8px; background: rgba(8, 18, 41, .6); }
+.skin-card { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px; border-radius: 14px; background: rgba(8, 18, 41, .6); border: 1px solid var(--navy-600); transition: border-color .15s, transform .15s; }
+.skin-card:hover { border-color: rgba(255, 113, 0, .45); transform: translateY(-2px); }
+.skin-card img, .skin-card-img { width: 72px; height: 96px; image-rendering: pixelated; border-radius: 8px; background: rgba(8, 18, 41, .6); }
+.skin-card button { cursor: pointer; }
 .skin-meta { text-align: center; width: 100%; }
 .skin-meta .hint { font-size: 10px; }
 .badge { font-size: 10px; font-weight: 900; letter-spacing: .08em; padding: 3px 7px; border-radius: 8px; background: var(--orange); color: #1a0e00; margin-left: 6px; vertical-align: middle; }

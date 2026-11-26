@@ -47,6 +47,7 @@ const ICONS = {
   cmd: '<path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>',
   bolt: '<path d="M13 2L4 14h6l-1 8 10-13h-6l1-7z"/>',
   skin: '<circle cx="12" cy="8" r="4"/><path d="M5 21v-1a7 7 0 0 1 14 0v1"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
 };
 const icon = (n, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[n] || ''}</svg>`;
@@ -120,7 +121,7 @@ const state = {
   rustInfo: null,
   rustError: '',
   rustCache: {},
-  skins: { sources: [], source: 'elyby', query: '', items: [], loading: false, error: '', currentUrl: null, applying: false, model: 'classic' },
+  skins: { sources: [], source: 'elyby', query: '', items: [], catalog: [], loading: false, error: '', current: null, urlInput: '', applying: false, model: 'classic' },
 };
 
 // platform: java — источники Java Edition, rust — только для Minecraft на Rust.
@@ -1327,17 +1328,19 @@ const SKIN_SOURCE_LABEL = { elyby: 'Ely.by', mojang: 'Mojang', littleskin: 'Litt
 function viewSkins() {
   const s = state.skins;
   const a = state.account;
-  const canApply = a && (a.type === 'microsoft' || a.type === 'elyby');
 
-  const current = s.currentUrl
+  const cur = s.current;
+  const current = cur && cur.url
     ? `<div class="card" style="margin-bottom:16px">
         <div class="row" style="align-items:center;gap:14px">
-          <img src="${esc(s.currentUrl)}" alt="скин" class="skin-preview broken-img">
+          <img src="${esc(cur.url)}" alt="скин" class="skin-preview" id="skin-current-img">
           <div class="grow">
             <div style="font-weight:900">Текущий скин</div>
             <div class="hint">${a ? esc(a.username) + ' · ' + accTypeLabel(a.type) : 'аккаунт не выбран'}</div>
-            <div class="hint mono" style="font-size:11px">${esc(s.currentUrl)}</div>
+            <div class="hint">Модель: ${cur.model === 'slim' ? 'Slim' : 'Classic'}</div>
+            <div class="hint mono" style="font-size:11px">${esc(cur.url)}</div>
           </div>
+          <button class="btn sm" data-act="skin-refresh-current" title="Обновить">${icon('refresh')}</button>
         </div>
       </div>`
     : `<div class="hint" style="margin-bottom:16px">${a ? 'Скин аккаунта отобразится здесь.' : 'Выберите аккаунт во вкладке «Аккаунт».'}</div>`;
@@ -1350,21 +1353,49 @@ function viewSkins() {
       </div>`
     : '';
 
-  const applyRow = canApply
+  const isMs = a && a.type === 'microsoft';
+  const isEly = a && a.type === 'elyby';
+  const applyRow = isMs
     ? `<div class="row" style="margin:12px 0">
         <button class="btn primary" data-act="skin-apply-file">Загрузить файл скина</button>
-        <button class="btn" data-act="skin-apply-url-prompt">По ссылке</button>
-        ${a.type === 'elyby' ? `<button class="btn" data-act="skin-open-ely">Открыть скин на ely.by</button>` : ''}
+        <button class="btn" data-act="skin-apply-url">По ссылке</button>
+      </div>
+      <div class="row" style="margin-bottom:4px">
+        <input class="input grow" id="skin-url-input" placeholder="Ссылка на PNG-скин, например https://…/steve.png" value="${esc(s.urlInput)}" style="margin:0">
       </div>`
+    : isEly
+      ? `<div class="row" style="margin:12px 0">
+        <button class="btn primary" data-act="skin-open-ely">Открыть скин на ely.by</button>
+      </div>
+      <div class="hint" style="margin:0 0 8px">Ely.by не имеет публичного API для смены скина — поставьте скин на сайте, игра подхватит его автоматически.</div>`
     : a && a.type === 'offline'
       ? `<div class="hint" style="margin:12px 0">У оффлайн-аккаунта скина нет: войдите через Microsoft или Ely.by.</div>`
       : `<div class="hint" style="margin:12px 0">Выберите аккаунт Microsoft или Ely.by во вкладке «Аккаунт».</div>`;
+
+  // Каталог готовых скинов
+  const catalogGrid = s.catalog.length
+    ? `<div class="skin-grid">
+        ${s.catalog.map(c => {
+          const srcId = s.source === 'all' ? 'mojang' : s.source;
+          const url = c.urls[srcId] || c.urls.mojang || c.urls.elyby;
+          return `
+          <div class="skin-card">
+            <img src="${esc(url)}" alt="скин" class="skin-card-img">
+            <div class="skin-meta">
+              <div style="font-weight:700">${esc(c.name)}</div>
+              <div class="hint">${esc(SKIN_SOURCE_LABEL[srcId] || srcId)}${c.desc ? ' · ' + esc(c.desc) : ''}</div>
+            </div>
+            <button class="btn sm primary" data-act="skin-pick" data-url="${esc(url)}" data-source="${esc(srcId)}">Применить</button>
+          </div>`;
+        }).join('')}
+      </div>`
+    : `<div class="hint" style="padding:20px">Каталог скинов не загрузился. Проверьте интернет и перезапустите лаунчер.</div>`;
 
   const results = s.items.length
     ? `<div class="skin-grid">
         ${s.items.map(it => `
           <div class="skin-card">
-            <img src="${esc(it.url)}" alt="скин" class="broken-img">
+            <img src="${esc(it.url)}" alt="скин" class="skin-card-img">
             <div class="skin-meta">
               <div style="font-weight:700">${esc(it.name)}</div>
               <div class="hint">${esc(SKIN_SOURCE_LABEL[it.source] || it.source)}</div>
@@ -1374,7 +1405,11 @@ function viewSkins() {
       </div>`
     : s.loading
       ? `<div class="hint" style="padding:20px">Ищу скины…</div>`
-      : `<div class="hint" style="padding:20px">Введите ник игрока и нажмите «Поиск» — появятся скины этого игрока из каталогов. Нажмите «Применить», чтобы поставить скин себе (для Mojang — напрямую через API, для Ely.by — откроется страница).</div>`;
+      : '';
+
+  const hint = !s.items.length && !s.loading
+    ? `<div class="hint" style="padding:20px">Выберите скин из каталога выше или введите ник игрока и нажмите «Поиск» — появятся скины этого игрока из каталогов. Нажмите «Применить», чтобы поставить скин себе (для Mojang — напрямую через API, для Ely.by — откроется страница).</div>`
+    : '';
 
   return `
     <h1 class="page-title">Скины</h1>
@@ -1393,7 +1428,9 @@ function viewSkins() {
       ${modelRow}
     </div>
     ${s.error ? `<div class="hint" style="color:var(--danger);margin-bottom:12px">${esc(s.error)}</div>` : ''}
+    ${catalogGrid}
     ${results}
+    ${hint}
     ${s.applying ? `<div class="hint" style="margin-top:12px">Применяю скин…</div>` : ''}`;
 }
 
@@ -1806,12 +1843,21 @@ async function loadAccounts() {
   state.selectedAccountId = r.selected || null;
   state.account = state.accounts.find(a => a.id === state.selectedAccountId) || null;
   // Перезагружаем текущий скин для нового активного аккаунта
-  if (state.account) {
-    try { state.skins.currentUrl = await window.ember.skins.current(state.account.id); }
-    catch (_) { state.skins.currentUrl = null; }
-  } else {
-    state.skins.currentUrl = null;
+  await refreshCurrentSkin();
+}
+
+// Загружает текущий скин активного аккаунта (для предпросмотра)
+async function refreshCurrentSkin() {
+  if (!state.account) {
+    state.skins.current = null;
+    return;
   }
+  try {
+    state.skins.current = await window.ember.skins.current(state.account.id);
+  } catch (_) {
+    state.skins.current = null;
+  }
+  if (state.view === 'skins') renderView();
 }
 
 document.addEventListener('click', async e => {
@@ -2246,7 +2292,7 @@ document.addEventListener('click', async e => {
         try {
           const r = await window.ember.skins.apply(state.account.id, { file, model: state.skins.model });
           toast(r.message || 'Скин установлен', 'ok');
-          if (state.account.type === 'elyby') state.skins.currentUrl = `https://ely.by/skin/${encodeURIComponent(state.account.username)}`;
+          await refreshCurrentSkin();
         } catch (err) {
           toast(err.message, 'err');
         } finally {
@@ -2255,21 +2301,30 @@ document.addEventListener('click', async e => {
         }
         return;
       }
-      case 'skin-apply-url-prompt': {
+      case 'skin-apply-url': {
         if (!state.account) return toast('Выберите аккаунт во вкладке «Аккаунт»', 'err');
-        const url = prompt('Ссылка на скин (PNG):', 'https://');
-        if (!url) return;
+        const input = $('#skin-url-input');
+        const url = (input && input.value ? input.value : '').trim();
+        state.skins.urlInput = url;
+        if (!url) return toast('Введите ссылку на скин', 'err');
+        if (!/^https?:\/\//i.test(url)) return toast('Ссылка должна начинаться с http:// или https://', 'err');
         state.skins.applying = true;
         renderView();
         try {
           const r = await window.ember.skins.apply(state.account.id, { url, model: state.skins.model });
           toast(r.message || 'Скин установлен', 'ok');
+          state.skins.urlInput = '';
+          await refreshCurrentSkin();
         } catch (err) {
           toast(err.message, 'err');
         } finally {
           state.skins.applying = false;
           renderView();
         }
+        return;
+      }
+      case 'skin-refresh-current': {
+        await refreshCurrentSkin();
         return;
       }
       case 'skin-pick': {
@@ -2278,9 +2333,10 @@ document.addEventListener('click', async e => {
         state.skins.applying = true;
         renderView();
         try {
-          if (t.dataset.source === 'mojang' && state.account.type === 'microsoft') {
+          if (state.account.type === 'microsoft') {
             const r = await window.ember.skins.apply(state.account.id, { url, model: state.skins.model });
             toast(r.message || 'Скин установлен', 'ok');
+            await refreshCurrentSkin();
           } else if (state.account.type === 'elyby') {
             await window.ember.openUrl(`https://ely.by/skin/${encodeURIComponent(state.account.username)}`);
             toast('Открыл страницу скина на ely.by — поставьте скин там', 'ok');
@@ -2430,6 +2486,7 @@ async function boot() {
   await loadAccounts();
   // Каталоги скинов
   try { state.skins.sources = await window.ember.skins.sources(); } catch (_) { state.skins.sources = []; }
+  try { state.skins.catalog = await window.ember.skins.catalog(); } catch (_) { state.skins.catalog = []; }
   state.musicFolder = await window.ember.music.folder();
   applyAnimations();
   applyLite();
