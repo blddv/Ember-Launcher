@@ -14,16 +14,18 @@ const DEFAULTS = {
   width: 1280,
   height: 720,
   fullscreen: false,
-  closeOnLaunch: false,     // закрыть лаунчер после старта игры
+  closeOnLaunch: false,     // свернуть лаунчер после старта игры
   showLogOnLaunch: false,   // сразу открыть лог на главной
+  hideOnClose: true,        // при закрытии окна сворачивать в трей, а не убивать игру
   rustPlayerName: '',       // ник в Minecraft на Rust (Horizon --name, Rustcraft)
   // Интерфейс
   animations: true,
   // Ключи и токены
   curseforgeKey: '',
   githubToken: '',          // необязательно: поднимает лимит GitHub API
-  // Аккаунт
-  account: null,            // { type: 'offline'|'elyby', username, uuid, accessToken? }
+  // Аккаунты (мультиаккаунтинг): массив, выбранный — selectedAccount
+  accounts: [],
+  selectedAccount: null,
   clientToken: '',
   // Сборки
   selectedInstance: null,
@@ -75,6 +77,11 @@ let data = null;
 
 function clone(v) { return JSON.parse(JSON.stringify(v)); }
 
+// Аккаунт без секретов (то, что можно показывать интерфейсу)
+function publicAccount(acc) {
+  return secure.publicAccount(acc);
+}
+
 function load() {
   if (data) return data;
   fs.mkdirSync(dirs.base, { recursive: true });
@@ -91,20 +98,46 @@ function load() {
     data.orangeVisuals.musicFolder = raw.music.folder;
   }
   delete data.music;
-  // Аккаунт: на диске лежит только шифробъект accountSecure, в памяти — открытый.
-  // Старый формат (открытым текстом) мигрирует на шифрование сразу.
+
+  // Миграция одиночного аккаунта (старый формат) в массив accounts
+  let accounts = [];
+  if (raw.accountsSecure) accounts = secure.decrypt(raw.accountsSecure) || [];
+  else if (Array.isArray(raw.accounts)) accounts = raw.accounts;
+  else if (raw.account) accounts = [migrateAccount(raw.account)];
+  else if (raw.accountSecure) accounts = [migrateAccount(secure.decrypt(raw.accountSecure))];
+  accounts = (accounts || []).filter(Boolean).map(a => ({ ...a, id: a.id || accountId(a) }));
+  data.accounts = accounts;
+  data.selectedAccount = raw.selectedAccount
+    || (accounts.length ? accounts[0].id : null);
+
+  delete data.account;        // единственный аккаунт больше не хранится отдельно
   delete data.accountSecure;
-  if (raw.accountSecure) data.account = secure.decrypt(raw.accountSecure);
-  else if (raw.account) save();
   return data;
+}
+
+function migrateAccount(acc) {
+  if (!acc) return null;
+  return { ...acc, id: accountId(acc) };
+}
+
+// Стабильный id аккаунта: по uuid, если нет — по типу+никнейму
+function accountId(acc) {
+  if (!acc) return '';
+  if (acc.uuid) return `${acc.type || 'acc'}:${acc.uuid}`;
+  if (acc.username) return `${acc.type || 'acc'}:${acc.username}`;
+  return `${acc.type || 'acc'}:${Math.random().toString(36).slice(2)}`;
 }
 
 function save() {
   fs.mkdirSync(dirs.base, { recursive: true });
-  // Секреты не пишутся открытым текстом: аккаунт шифруем, токены остаются только в памяти
+  // Секреты не пишутся открытым текстом: аккаунты шифруем целиком, токены остаются только в памяти
   const out = { ...data };
   delete out.account;
-  if (data.account) out.accountSecure = secure.encrypt(data.account);
+  delete out.accounts;
+  delete out.accountSecure;
+  if (Array.isArray(data.accounts) && data.accounts.length) {
+    out.accountsSecure = secure.encrypt(data.accounts);
+  }
   const tmp = FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(out, null, 2), 'utf8');
   // Файл с шифробъектом — только для владельца (на POSIX)
@@ -132,4 +165,67 @@ function patch(obj) {
   return clone(data);
 }
 
-module.exports = { get, set, patch, load, DEFAULTS };
+/* ================= Мультиаккаунтинг ================= */
+
+function activeAccount() {
+  load();
+  const list = data.accounts || [];
+  if (!list.length) return null;
+  const sel = data.selectedAccount;
+  return list.find(a => a.id === sel) || list[0];
+}
+
+function publicAccounts() {
+  return (load().accounts || []).map(publicAccount);
+}
+
+// Добавляет или обновляет аккаунт (по id) и делает его активным
+function addAccount(acc) {
+  load();
+  if (!acc || !acc.type) throw new Error('Некорректный аккаунт');
+  const id = acc.id || accountId(acc);
+  const clean = { ...acc, id };
+  const idx = (data.accounts || []).findIndex(a => a.id === id);
+  if (idx >= 0) data.accounts[idx] = { ...data.accounts[idx], ...clean };
+  else data.accounts.push(clean);
+  data.selectedAccount = id;
+  save();
+  return clean;
+}
+
+function updateAccount(acc) {
+  load();
+  if (!acc || !acc.id) return acc;
+  const idx = (data.accounts || []).findIndex(a => a.id === acc.id);
+  if (idx >= 0) data.accounts[idx] = { ...data.accounts[idx], ...acc };
+  else data.accounts.push(acc);
+  save();
+  return acc;
+}
+
+function selectAccount(id) {
+  load();
+  if (!data.accounts.find(a => a.id === id)) return;
+  data.selectedAccount = id;
+  save();
+}
+
+function accountById(id) {
+  load();
+  return (data.accounts || []).find(a => a.id === id) || null;
+}
+
+function removeAccount(id) {
+  load();
+  data.accounts = (data.accounts || []).filter(a => a.id !== id);
+  if (data.selectedAccount === id) {
+    data.selectedAccount = data.accounts[0] ? data.accounts[0].id : null;
+  }
+  save();
+}
+
+module.exports = {
+  get, set, patch, load, DEFAULTS,
+  publicAccount, activeAccount, publicAccounts,
+  addAccount, updateAccount, selectAccount, removeAccount, accountById, accountId,
+};

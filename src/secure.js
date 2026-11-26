@@ -67,10 +67,11 @@ function decrypt(blob) {
   return null;
 }
 
-// Аккаунт без секретов — всё, что можно показывать интерфейсу
+// Аккаунт без секретов — всё, что можно показывать интерфейсу.
+// id — стабильный идентификатор (не секрет): нужен для переключения и выбора скина.
 function publicAccount(acc) {
   if (!acc) return null;
-  return { type: acc.type, username: acc.username, uuid: acc.uuid };
+  return { id: acc.id, type: acc.type, username: acc.username, uuid: acc.uuid };
 }
 
 module.exports = { encrypt, decrypt, publicAccount, ssAvailable };

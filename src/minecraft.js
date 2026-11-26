@@ -351,11 +351,14 @@ async function launch(opts) {
   report({ stage: 'Запуск', text: nativeClient ? 'Запускаю клиент на Rust…' : 'Запускаю Minecraft…' });
   onLog(`> ${javaBin}\n`);
   if (loaderVersion) onLog(`> загрузчик: ${loaderVersion}\n`);
-  const proc = spawn(javaBin, args, { cwd: gameDir, windowsHide: true });
+  // detached: игра живёт в своей группе процессов и не закрывается вместе с лаунчером
+  const proc = spawn(javaBin, args, { cwd: gameDir, windowsHide: true, detached: true });
   proc.stdout.on('data', d => onLog(d.toString()));
   proc.stderr.on('data', d => onLog(d.toString()));
   proc.on('error', e => onLog(`Ошибка запуска: ${e.message}\n`));
   proc.on('exit', code => onExit(code));
+  // Игра живёт независимо от лаунчера: закрытие окна сворачивает его в трей, а не убивает игру
+  proc.unref();
   proc.loaderVersion = loaderVersion;
   return proc;
 }

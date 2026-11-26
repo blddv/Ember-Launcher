@@ -142,7 +142,30 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .acc-chip .who { min-width: 0; }
 .acc-chip .who b { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .acc-chip .who span { font-size: 11px; color: var(--muted); }
+.acc-chip.switchable { cursor: pointer; }
+.acc-chip.switchable:hover { border-color: rgba(255, 113, 0, .5); }
+.acc-dots { display: flex; gap: 4px; flex: none; margin-left: auto; }
+.acc-dots i { width: 9px; height: 9px; border-radius: 50%; background: rgba(255, 255, 255, .18); cursor: pointer; transition: background .15s; }
+.acc-dots i.on { background: var(--orange); }
+.acc-dots i:hover { background: var(--orange-soft); }
 .ver-foot { font-size: 11px; color: #56617D; text-align: center; letter-spacing: .06em; }
+
+/* ===== Скины и список аккаунтов ===== */
+.skin-preview { width: 96px; height: 96px; border-radius: 12px; image-rendering: pixelated; background: rgba(8, 18, 41, .6); border: 1px solid var(--navy-600); flex: none; }
+.img-broken { opacity: .25; filter: grayscale(1); }
+.skin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 14px; }
+.skin-card { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px; border-radius: 14px; background: rgba(8, 18, 41, .6); border: 1px solid var(--navy-600); }
+.skin-card img { width: 72px; height: 96px; image-rendering: pixelated; border-radius: 8px; background: rgba(8, 18, 41, .6); }
+.skin-meta { text-align: center; width: 100%; }
+.skin-meta .hint { font-size: 10px; }
+.badge { font-size: 10px; font-weight: 900; letter-spacing: .08em; padding: 3px 7px; border-radius: 8px; background: var(--orange); color: #1a0e00; margin-left: 6px; vertical-align: middle; }
+.acc-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 8px; }
+.acc-item { display: flex; align-items: center; gap: 14px; padding: 14px; border-radius: 14px; background: rgba(8, 18, 41, .6); border: 1px solid var(--navy-600); transition: border-color .15s; }
+.acc-item.active { border-color: var(--orange); box-shadow: 0 0 0 1px rgba(255, 113, 0, .4); }
+.acc-pick { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; background: none; border: none; cursor: pointer; text-align: left; padding: 0; color: var(--text); }
+.acc-pick .big-avatar { width: 52px; height: 52px; font-size: 22px; border-radius: 12px; flex: none; }
+.acc-pick .grow { min-width: 0; }
+.acc-actions { display: flex; gap: 8px; flex: none; }
 
 /* ===== Основная область ===== */
 .main {

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -19,11 +19,15 @@ const perf = require('./src/perf');
 const http = require('./src/http');
 const crash = require('./src/crash');
 const secure = require('./src/secure');
+const skins = require('./src/skins');
 
 let win = null;
 let running = null; // { instanceId, proc, startedAt }
 let stopRequested = false; // игра остановлена кнопкой лаунчера, это не падение
 let logBuffer = []; // последние строки лога текущей сессии
+let forceQuit = false; // реальный выход по кнопке «Выход» из трея
+let tray = null; // иконка в трее: лаунчер можно скрыть, не убивая игру
+const TRAY_ICON = path.join(__dirname, 'assets', 'icon.png');
 
 function pushLog(text) {
   logBuffer.push(...String(text).split(/\r?\n/));
@@ -130,12 +134,61 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      backgroundThrottling: false,
+      // Когда окно скрыто (играёт Minecraft), рендерер притормаживается —
+      // это снимает нагрузку с CPU/GPU и не «съедает» FPS игры.
+      backgroundThrottling: true,
     },
   });
   win.setMenuBarVisibility(false);
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.once('ready-to-show', () => win.show());
+
+  // Закрытие окна, пока игра запущена: сворачиваем в трей, а не убиваем игру.
+  win.on('close', e => {
+    if (forceQuit) return;
+    if (running && store.get('hideOnClose') !== false) {
+      e.preventDefault();
+      if (win && !win.isDestroyed()) win.hide();
+      return;
+    }
+  });
+}
+
+// Иконка в трее: позволяет открыть лаунчер обратно и корректно выйти (убив игру).
+function createTray() {
+  let img;
+  try { img = nativeImage.createFromPath(TRAY_ICON); } catch (_) { img = null; }
+  if (!img || img.isEmpty()) return;
+  try {
+    tray = new Tray(img);
+  } catch (_) {
+    // На системах без трея (например, некоторые окружения Linux) иконку не построить —
+    // это не критично: закрытие окна скроет приложение, а игра останется жить.
+    tray = null;
+    return;
+  }
+  const buildMenu = () => {
+    const items = [{ label: 'Открыть лаунчер', click: () => { if (win && !win.isDestroyed()) { win.show(); win.focus(); } } }];
+    if (running) items.push({ label: 'Остановить игру и выйти', click: () => { quitForReal(); } });
+    items.push({ type: 'separator' }, { label: 'Выйти', click: () => quitForReal() });
+    tray.setContextMenu(Menu.buildFromTemplate(items));
+  };
+  tray.setToolTip('EMBER Launcher');
+  tray.on('click', () => { if (win && !win.isDestroyed()) { win.show(); win.focus(); } });
+  buildMenu();
+  tray.buildMenu = buildMenu;
+}
+
+function refreshTray() { if (tray && tray.buildMenu) tray.buildMenu(); }
+
+function quitForReal() {
+  forceQuit = true;
+  if (running && running.proc) {
+    try { running.proc.kill(); } catch (_) { /* уже нет */ }
+  }
+  running = null;
+  if (tray) { try { tray.destroy(); } catch (_) {} tray = null; }
+  app.quit();
 }
 
 async function launchFlow(instanceId) {
@@ -145,11 +198,13 @@ async function launchFlow(instanceId) {
   let inst = instances.find(instanceId);
   const platform = instances.platformOf(inst);
   const rustInstance = platform !== 'java';
-  let account = store.get('account');
+  // Поддерживаем несколько аккаунтов: стартуем с выбранным в настройках/вкладке «Аккаунт»
+  let account = store.activeAccount();
   // Java Edition без аккаунта не запустится. Minecraft на Rust обходится без Ely.by:
   // Horizon входит сам, Rustcraft получает оффлайн-профиль.
   if (!rustInstance && !account) throw new Error('Сначала выберите аккаунт во вкладке «Аккаунт»');
   running = { instanceId, proc: null, startedAt: 0 };
+  refreshTray();
   send('game:state', { running: true, instanceId, platform });
 
   // Игра закрылась: считаем время, сообщаем интерфейсу и при падении открываем разбор
@@ -160,6 +215,7 @@ async function launchFlow(instanceId) {
     const wasStopped = stopRequested;
     stopRequested = false;
     running = null;
+    refreshTray();
     send('game:state', { running: false, instanceId, code, playMs: ms, platform });
     if (!wasStopped) {
       handleUnexpectedExit({ instanceId, code, startedAt, playMs: ms, logLines: logBuffer.slice() })
@@ -356,7 +412,8 @@ function bootstrap() {
   // Токены аккаунтов интерфейсу не отдаются: в окно уходит только ник, UUID и тип
   ipcMain.handle('settings:get', () => {
     const s = store.get();
-    s.account = secure.publicAccount(s.account);
+    // Старое поле account заменяется массивом accounts; для удобства оставляем и activeAccount
+    s.account = store.activeAccount() ? secure.publicAccount(store.activeAccount()) : null;
     return s;
   });
   ipcMain.handle('settings:save', (_e, patch) => store.patch(patch));
@@ -514,20 +571,47 @@ function bootstrap() {
     return true;
   });
   ipcMain.handle('game:status', () => ({ running: !!running, instanceId: running && running.instanceId }));
+  ipcMain.handle('game:hide', () => win && win.hide());
 
-  ipcMain.handle('auth:ely', async (_e, { login, password }) => {
-    const acc = await auth.elyAuthenticate(login, password);
-    store.set('account', acc);
-    return secure.publicAccount(acc);
+  // ── Аккаунты (мультиаккаунтинг): список, добавление, выбор, удаление, выход ──
+  ipcMain.handle('accounts:list', () => ({
+    accounts: store.publicAccounts(),
+    selected: store.get('selectedAccount'),
+  }));
+  ipcMain.handle('accounts:select', (_e, id) => {
+    store.selectAccount(id);
+    return true;
   });
-  ipcMain.handle('auth:offline', (_e, name) => {
-    const acc = auth.offlineAccount(name);
-    store.set('account', acc);
-    return secure.publicAccount(acc);
+  ipcMain.handle('accounts:add', async (_e, { type, payload, label }) => {
+    let acc;
+    if (type === 'elyby') {
+      acc = await auth.elyAuthenticate(payload.login, payload.password);
+      if (label) acc.label = String(label).trim();
+    } else if (type === 'offline') {
+      acc = auth.offlineAccount(payload && payload.name ? payload.name : 'Player');
+      if (label) acc.label = String(label).trim();
+    } else {
+      throw new Error('Недопустимый тип аккаунта');
+    }
+    const created = store.addAccount(acc);
+    store.selectAccount(created.id);
+    return secure.publicAccount(created);
   });
-  ipcMain.handle('auth:logout', async () => {
-    await auth.elyLogout(store.get('account'));
-    store.set('account', null);
+  ipcMain.handle('accounts:remove', async (_e, id) => {
+    const acc = store.removeAccount(id);
+    if (acc && acc.type === 'elyby') {
+      // Выходим, чтобы на Ely.by не оставалось «чистой» активной сессии
+      await auth.elyLogout(acc).catch(() => {});
+    }
+    return true;
+  });
+  ipcMain.handle('accounts:logout', async (_e, id) => {
+    const acc = store.accountById(id);
+    if (acc && acc.type === 'elyby') {
+      await auth.elyLogout(acc);
+      const updated = store.updateAccount(id, { active: false });
+      return secure.publicAccount(updated);
+    }
     return true;
   });
 
@@ -539,7 +623,12 @@ function bootstrap() {
     const dc = await auth.msDeviceCode();
     let cancel = false;
     const promise = auth.msLogin({ deviceCode: dc.device_code, interval: dc.interval }, () => cancel)
-      .then(acc => { store.set('account', acc); return acc; })
+      .then(acc => {
+        // Добавляем в список аккаунтов, а не перезаписываем единственный
+        const created = store.addAccount(acc);
+        store.selectAccount(created.id);
+        return created;
+      })
       .finally(() => { msPending = null; });
     // Защита от unhandled rejection, если окно закрыли, не дождавшись входа
     promise.catch(() => {});
@@ -560,6 +649,73 @@ function bootstrap() {
     if (msPending) msPending.cancel();
     return true;
   });
+
+  // ── Скины: каталоги, поиск, текущий скин, применение ──
+  ipcMain.handle('skins:sources', () => skins.listSources());
+  ipcMain.handle('skins:search', async (_e, { source, query }) => {
+    const nick = typeof query === 'string' ? query : '';
+    return skins.search(source, nick);
+  });
+  ipcMain.handle('skins:current', async (_e, { accountId }) => {
+    const acc = store.accountById(accountId);
+    if (!acc) throw new Error('Аккаунт не найден');
+    return skins.currentSkinUrl(acc);
+  });
+  ipcMain.handle('skins:apply', async (_e, { accountId, file, url }) => {
+    const acc = store.accountById(accountId);
+    if (!acc) throw new Error('Аккаунт не найден');
+    const result = await skins.apply(acc, { file, url });
+    return { ok: true, source: acc.type, url: result.url, message: result.message || '' };
+  });
+  ipcMain.handle('skins:pickImage', async () => {
+    const r = await dialog.showOpenDialog(win, {
+      title: 'Скины',
+      properties: ['openFile'],
+      filters: [{ name: 'Скины (png)', extensions: ['png'] }],
+    });
+    return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
+  });
+
+  // Импорт mrpack / CurseForge-сборки из локального zip
+  ipcMain.handle('import:zip', async () => {
+    const r = await dialog.showOpenDialog(win, {
+      title: 'Импорт сборки',
+      properties: ['openFile'],
+      filters: [{ name: 'Сборки (mrpack / zip)', extensions: ['mrpack', 'zip'] }],
+    });
+    if (r.canceled || !r.filePaths[0]) return { cancelled: true };
+    const file = r.filePaths[0];
+    const lower = file.toLowerCase();
+    if (lower.endsWith('.mrpack')) {
+      const inst = await providers.installMrpack(file, path.basename(file));
+      report({ stage: 'Импорт', text: `Сборка «${inst.name}» импортирована` });
+      return { kind: 'mrpack', instance: inst };
+    }
+    // .zip: пробуем CurseForge (manifest.json), иначе Modrinth (modrinth.index.json), иначе EMBER
+    if (zipHasEntry(file, 'manifest.json')) {
+      const inst = await providers.installCurseForgeModpackFile(file);
+      report({ stage: 'Импорт', text: `Сборка «${inst.name}» импортирована` });
+      return { kind: 'curseforge', instance: inst };
+    }
+    if (zipHasEntry(file, 'modrinth.index.json')) {
+      const inst = await providers.installMrpack(file, path.basename(file));
+      report({ stage: 'Импорт', text: `Сборка «${inst.name}» импортирована` });
+      return { kind: 'mrpack', instance: inst };
+    }
+    const inst = instances.importZip(file);
+    report({ stage: 'Импорт', text: `Сборка «${inst.name}» импортирована` });
+    return { kind: 'ember', instance: inst };
+  });
+
+  function zipHasEntry(file, name) {
+    try {
+      const z = new AdmZip();
+      z.readFromFile(file);
+      return !!z.getEntry(name);
+    } catch (_) {
+      return false;
+    }
+  }
 
   ipcMain.handle('clipboard:copy', (_e, text) => {
     clipboard.writeText(String(text || ''));
@@ -607,10 +763,19 @@ function bootstrap() {
 app.whenReady().then(() => {
   bootstrap();
   createWindow();
+  createTray();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
 app.on('window-all-closed', () => {
-  if (running && running.proc) running.proc.kill();
+  // Игра запущена: по умолчанию держим приложение живым в фоне (окно скрыто, иконка в
+  // трее), чтобы не убить Minecraft при закрытии лаунчера. Если пользователь специально
+  // отключил «Скрывать при закрытии», выполняем старое поведение — останавливаем игру и выходим.
+  if (running) {
+    if (store.get('hideOnClose') === false) {
+      try { running.proc && running.proc.kill(); } catch (_) { /* уже нет */ }
+    }
+    return;
+  }
   app.quit();
 });

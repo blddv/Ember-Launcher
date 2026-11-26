@@ -115,6 +115,7 @@ async function installMrpack(file, nameFallback) {
   const index = JSON.parse(zip.readAsText('modrinth.index.json'));
   const deps = index.dependencies || {};
   const mc = deps.minecraft;
+  if (!mc) throw new Error('В .mrpack не указана версия Minecraft');
   let loader = 'vanilla';
   let loaderVersion = '';
   const map = [['fabric-loader', 'fabric'], ['quilt-loader', 'quilt'], ['forge', 'forge'], ['neoforge', 'neoforge']];
@@ -123,10 +124,13 @@ async function installMrpack(file, nameFallback) {
   }
   const inst = instances.create({ name: index.name || nameFallback, version: mc, loader, loaderVersion });
   const dir = instances.getGameDir(inst);
-  const files = index.files.filter(f => !(f.env && f.env.client === 'unsupported'));
+  const files = (index.files || []).filter(f => !(f.env && f.env.client === 'unsupported'));
+  if (!files.length) throw new Error('В .mrpack нет файлов для клиента');
   await pool(files, 6, f => {
+    const url = (Array.isArray(f.downloads) && f.downloads[0]) || f.url;
+    if (!url) throw new Error(`У файла ${f.path} нет ссылки для скачивания`);
     const dest = safeJoin(dir, f.path);
-    return downloadFile(f.downloads[0], dest, { sha1: f.hashes && f.hashes.sha1 });
+    return downloadFile(url, dest, { sha1: f.hashes && f.hashes.sha1 });
   });
   extractOverrides(zip, dir, ['overrides/', 'client-overrides/']);
   return inst;
@@ -230,6 +234,11 @@ async function installCurseForgeModpack(modId) {
   const dest = path.join(dirs.tmp, `cf-${f.id}.zip`);
   await downloadFile(cfDownloadUrl(f), dest);
   const zip = new AdmZip(dest);
+  return cfModpackFromZip(zip);
+}
+
+// Общая часть установки CurseForge-сборки: принимает уже открытый архив с manifest.json.
+async function cfModpackFromZip(zip) {
   const manifest = JSON.parse(zip.readAsText('manifest.json'));
   const mc = manifest.minecraft.version;
   const ml = (manifest.minecraft.modLoaders || []).find(x => x.primary) || (manifest.minecraft.modLoaders || [])[0];
@@ -246,15 +255,28 @@ async function installCurseForgeModpack(modId) {
   const dir = instances.getGameDir(inst);
   const modsDir = path.join(dir, 'mods');
 
-  const ids = manifest.files.filter(x => x.required !== false).map(x => x.fileID);
-  const resolved = [];
-  for (let i = 0; i < ids.length; i += 50) {
-    const r = await fetchJson(`${CF}/mods/files`, { method: 'POST', headers: cfHeaders(), json: { fileIds: ids.slice(i, i + 50) } });
-    resolved.push(...r.data);
+  const ids = (manifest.files || []).filter(x => x.required !== false).map(x => x.fileID);
+  if (ids.length) {
+    const resolved = [];
+    for (let i = 0; i < ids.length; i += 50) {
+      const r = await fetchJson(`${CF}/mods/files`, { method: 'POST', headers: cfHeaders(), json: { fileIds: ids.slice(i, i + 50) } });
+      resolved.push(...r.data);
+    }
+    await pool(resolved, 6, f2 => downloadFile(cfDownloadUrl(f2), path.join(modsDir, f2.fileName), { sha1: sha1Of(f2) }));
+  } else {
+    // Старые сборки держат моды прямо в архиве (папка overrides/mods)
+    const e = zip.getEntry('overrides/mods/');
+    if (e) extractOverrides(zip, dir, ['overrides/']);
   }
-  await pool(resolved, 6, f2 => downloadFile(cfDownloadUrl(f2), path.join(modsDir, f2.fileName), { sha1: sha1Of(f2) }));
   extractOverrides(zip, dir, [manifest.overrides ? manifest.overrides + '/' : 'overrides/']);
   return inst;
+}
+
+// Импорт CurseForge-сборки из скачанного .zip файла (кнопка «Импорт CurseForge»).
+async function installCurseForgeModpackFile(file) {
+  const zip = new AdmZip(file);
+  if (!zip.getEntry('manifest.json')) throw new Error('Это не архив CurseForge: внутри нет manifest.json');
+  return cfModpackFromZip(zip);
 }
 
 /* ================= HANGAR (плагины Paper) ================= */
@@ -595,5 +617,5 @@ async function install(item, instance, opts = {}) {
 
 module.exports = {
   search, install, installStates, installMrpack, installModrinthFiles, FABRIC_API_ID, safeJoin, label,
-  horizonSearch, horizonGithubSearch, requireRust,
+  horizonSearch, horizonGithubSearch, requireRust, installCurseForgeModpackFile,
 };

@@ -33,7 +33,7 @@ function clientToken() {
 function offlineAccount(name) {
   const username = (name || '').trim();
   if (!/^[A-Za-z0-9_]{3,16}$/.test(username)) throw new Error('Ник: 3–16 символов, латиница, цифры и _');
-  return { type: 'offline', username, uuid: offlineUuid(username) };
+  return { type: 'offline', id: 'offline:' + username, username, uuid: offlineUuid(username) };
 }
 
 async function elyAuthenticate(login, password) {
@@ -47,6 +47,7 @@ function fromElyResponse(res) {
   if (!res.selectedProfile) throw new Error('Ely.by не вернул профиль персонажа');
   return {
     type: 'elyby',
+    id: 'elyby:' + res.selectedProfile.id,
     username: res.selectedProfile.name,
     uuid: formatUuid(res.selectedProfile.id),
     accessToken: res.accessToken,
@@ -178,6 +179,7 @@ async function msAccount(msAuth, prevRefresh) {
   }
   return {
     type: 'microsoft',
+    id: 'ms:' + profile.id,
     username: profile.name,
     uuid: formatUuid(profile.id),
     accessToken: mc.access_token,
@@ -202,7 +204,7 @@ async function ensureAccount(account) {
     try {
       const msAuth = await msRefresh(account.msRefreshToken);
       const fresh = await msAccount(msAuth, account.msRefreshToken);
-      store.set('account', fresh);
+      store.updateAccount(fresh);
       return fresh;
     } catch (e) {
       throw new Error('Сессия Microsoft истекла. Войдите в аккаунт заново.');
@@ -215,7 +217,7 @@ async function ensureAccount(account) {
       json: { accessToken: account.accessToken, clientToken: clientToken(), requestUser: true },
     });
     const fresh = fromElyResponse(res);
-    store.set('account', fresh);
+    store.updateAccount(fresh);
     return fresh;
   } catch (e) {
     throw new Error('Сессия Ely.by истекла. Войдите в аккаунт заново.');
@@ -224,7 +226,7 @@ async function ensureAccount(account) {
 
 async function elyLogout(account) {
   if (account && account.type === 'elyby' && account.accessToken) {
-    try { await fetchBuffer(`${ELY}/auth/invalidate`, { method: 'POST', json: { accessToken: account.accessToken, clientToken: clientToken() } }); } catch (_) {}
+    try { await fetchBuffer(`${ELY}/auth/invalidate`, { method: 'POST', json: { accessToken: account.accessToken, clientToken: clientToken() } }); } catch (_) { }
   }
 }
 

@@ -394,15 +394,38 @@ async function ensurePrepared(p, engine, report = () => {}, onLog = () => {}) {
   return engine;
 }
 
+// Создаёт ссылку-джункшн/символическую ссылку target -> linkPath (без прав администратора
+// на Windows используем junction — он работает для папок и не требует привилегий).
+function linkDir(target, linkPath) {
+  const fs2 = require('fs');
+  if (fs2.existsSync(linkPath)) return; // уже есть (ссылка или настоящая папка)
+  fs2.mkdirSync(path.dirname(linkPath), { recursive: true });
+  try {
+    if (process.platform === 'win32') fs2.symlinkSync(target, linkPath, 'junction');
+    else fs2.symlinkSync(target, linkPath, 'dir');
+  } catch (e) {
+    // Не смогли сделать ссылку (старая Windows, права): разворачиваем game-files вручную
+    try { fs2.cpSync(target, linkPath, { recursive: true }); } catch (_) { /* пусть launch уточнит ошибку */ }
+  }
+}
+
 // Запуск Horizon. Rustcraft запускает minecraft.launch с подменой java на свой бинарник.
 async function launch({ instance, report = () => {}, onLog = () => {}, onExit = () => {} }) {
   const p = platform(instance.loader);
   if (!p) throw new Error(`Сборка «${instance.name}»: неизвестная Rust-платформа ${instance.loader}`);
   if (p.javaExec) throw new Error(`${p.label} запускается через аргументы игры, а не напрямую`);
 
-  const tag = instance.loaderVersion || (await latestRelease(p.id)).tag;
+  const latest = await latestRelease(p.id, { fresh: false }).catch(() => null);
+  const tag = instance.loaderVersion || (latest && latest.tag);
+  if (!tag) {
+    throw new Error(`${p.label}: не удалось определить версию движка. Проверьте интернет или нажмите «Скачать движок» во вкладке «Minecraft Rust».`);
+  }
   report({ stage: p.label, text: `Проверяю ${p.label} ${tag}…` });
   const engine = await ensureEngine(p.id, tag, report, onLog);
+  // Если после распаковки исполняемого файла почему-то нет — сообщаем понятно, а не крашимся молча.
+  if (!fs.existsSync(engine.bin)) {
+    throw new Error(`${p.label}: исполняемый файл ${path.basename(engine.bin)} не найден в папке движка. Попробуйте «Скачать движок» заново.`);
+  }
   await ensurePrepared(p, engine, report, onLog);
 
   const gameDir = instance.gameDir;
@@ -410,19 +433,42 @@ async function launch({ instance, report = () => {}, onLog = () => {}, onExit = 
   const env = { ...process.env };
   if (p.homeEnv) env[p.homeEnv] = gameDir;
 
+  // Horizon ищет данные игры (game-files) в HORIZON_HOME. Готовится game-files один раз
+  // в папке движка (shared), поэтому делаем из неё ссылку в папку сборки: иначе Horizon
+  // не находит game-files и крашится сразу после старта.
+  const gameFiles = path.join(engine.dir, 'game-files');
+  if (fs.existsSync(gameFiles)) {
+    const instGameFiles = path.join(gameDir, 'game-files');
+    if (!fs.existsSync(instGameFiles)) {
+      linkDir(gameFiles, instGameFiles);
+      onLog(`> game-files: ${instGameFiles} → ${gameFiles}\n`);
+    }
+  }
+
   const args = [];
-  const resources = path.join(engine.dir, '.local', 'horizon-client', p.game);
-  if (fs.existsSync(resources)) args.push('--resources', resources);
+  // Для Horizon ресурсы могут лежать в .local/horizon-client/<game> или рядом с бинарником
+  const candidates = [
+    path.join(engine.dir, '.local', 'horizon-client', p.game),
+    path.join(engine.dir, 'horizon-client', p.game),
+    path.join(engine.dir, 'resources'),
+  ];
+  const resources = candidates.find(c => fs.existsSync(c));
+  if (resources) args.push('--resources', resources);
   const player = store.get('rustPlayerName');
-  if (player) args.push('--name', player);
+  if (player && player.trim()) args.push('--name', player.trim());
 
   report({ stage: 'Запуск', text: `Запускаю ${p.label}…` });
   onLog(`> ${engine.bin} ${args.join(' ')}\n> папка игры: ${gameDir}\n`);
-  const proc = spawn(engine.bin, args, { cwd: gameDir, env, windowsHide: false });
+  // detached: движок живёт в своей группе процессов и не закрывается вместе с лаунчером
+  const proc = spawn(engine.bin, args, { cwd: gameDir, env, windowsHide: false, detached: true });
+  let exited = false;
+  const finish = code => { if (exited) return; exited = true; onExit(typeof code === 'number' ? code : 1); };
   proc.stdout.on('data', d => onLog(d.toString()));
   proc.stderr.on('data', d => onLog(d.toString()));
-  proc.on('error', e => onLog(`Ошибка запуска: ${e.message}\n`));
-  proc.on('exit', code => onExit(code));
+  proc.on('error', e => { onLog(`Ошибка запуска: ${e.message}\n`); finish(1); });
+  proc.on('exit', code => finish(code));
+  // Не держим лаунчер «в заложниках» процесса игры: игра живёт независимо
+  proc.unref();
   proc.rustEngine = { platform: p.id, tag: engine.tag };
   return proc;
 }

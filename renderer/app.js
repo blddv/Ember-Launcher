@@ -46,6 +46,8 @@ const ICONS = {
   alert: '<path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
   cmd: '<path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>',
   bolt: '<path d="M13 2L4 14h6l-1 8 10-13h-6l1-7z"/>',
+  skin: '<circle cx="12" cy="8" r="4"/><path d="M5 21v-1a7 7 0 0 1 14 0v1"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
 };
 const icon = (n, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[n] || ''}</svg>`;
 
@@ -61,6 +63,7 @@ const NAV = [
   ] },
   { group: 'Система', items: [
     { id: 'account', label: 'Аккаунт', icon: 'user' },
+    { id: 'skins', label: 'Скины', icon: 'skin' },
     { id: 'settings', label: 'Настройки', icon: 'gear' },
   ] },
 ];
@@ -98,6 +101,8 @@ const state = {
   runningId: null,
   versions: [],
   account: null,
+  accounts: [],
+  selectedAccountId: null,
   running: false,
   preparing: false,
   mod: null,
@@ -115,6 +120,7 @@ const state = {
   rustInfo: null,
   rustError: '',
   rustCache: {},
+  skins: { sources: [], source: 'elyby', query: '', items: [], loading: false, error: '', currentUrl: null, applying: false, model: 'classic' },
 };
 
 // platform: java — источники Java Edition, rust — только для Minecraft на Rust.
@@ -219,6 +225,7 @@ function renderSidebarFoot() {
   const foot = $('#sidebar-foot');
   if (!foot) return;
   const a = state.account;
+  const list = state.accounts || [];
   const initial = a ? esc(a.username[0].toUpperCase()) : '?';
   foot.innerHTML = `
     <div class="social-row">
@@ -229,12 +236,13 @@ function renderSidebarFoot() {
         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg>
       </button>
     </div>
-    <div class="acc-chip">
+    <div class="acc-chip ${list.length > 1 ? 'switchable' : ''}" data-act="go-account" title="Открыть вкладку «Аккаунт»">
       <div class="avatar">${initial}</div>
       <div class="who">
         <b>${a ? esc(a.username) : 'Не выбран'}</b>
-        <span>${a ? accTypeLabel(a.type) : 'Войдите во вкладке «Аккаунт»'}</span>
+        <span>${a ? accTypeLabel(a.type) : 'Войдите во вкладке «Аккаунт»'}${list.length > 1 ? ` · ${list.length} аккаунтов` : ''}</span>
       </div>
+      ${list.length > 1 ? `<span class="acc-dots">${list.map((x, i) => `<i class="${x.id === state.selectedAccountId ? 'on' : ''}" data-act="acc-dot" data-id="${esc(x.id)}" title="${esc(x.username)}"></i>`).join('')}</span>` : ''}
     </div>
     <div class="ver-foot">Minecraft · Fabric · Quilt · Forge · NeoForge · Rust</div>`;
 }
@@ -256,7 +264,7 @@ function renderView() {
   const el = $('#view');
   if (!el) return;
   if (observer) { observer.disconnect(); observer = null; }
-  const views = { home: viewHome, instances: viewInstances, rust: viewRust, mods: viewMods, account: viewAccount, settings: viewSettings, screens: viewScreens };
+  const views = { home: viewHome, instances: viewInstances, rust: viewRust, mods: viewMods, account: viewAccount, skins: viewSkins, settings: viewSettings, screens: viewScreens };
   el.innerHTML = views[state.view]();
   el.scrollTop = 0;
   renderBusy();
@@ -1232,19 +1240,28 @@ function accTypeHint(a) {
 
 function viewAccount() {
   const a = state.account;
-  const current = a
-    ? `<div class="card" style="margin-bottom:18px">
-        <div class="current-acc">
-          <div class="big-avatar">${esc(a.username[0].toUpperCase())}</div>
-          <div class="grow">
-            <div style="font-size:18px;font-weight:900">${esc(a.username)}</div>
-            <div class="hint">${accTypeHint(a)}</div>
-            <div class="hint mono" style="margin-top:4px;font-size:11px">UUID ${esc(a.uuid)}</div>
-          </div>
-          <button class="btn danger" data-act="logout">${icon('logout')} Выйти</button>
-        </div>
+  const list = state.accounts || [];
+
+  const accountCards = list.length
+    ? `<div class="acc-list">
+        ${list.map(acc => `
+          <div class="acc-item ${acc.id === state.selectedAccountId ? 'active' : ''}">
+            <button class="acc-pick" data-act="account-select" data-id="${esc(acc.id)}" title="Сделать активным">
+              <div class="big-avatar">${esc((acc.username || '?').charAt(0).toUpperCase())}</div>
+              <div class="grow">
+                <div style="font-size:16px;font-weight:900">${esc(acc.username)} ${acc.id === state.selectedAccountId ? '<span class="badge">активный</span>' : ''}</div>
+                <div class="hint">${accTypeHint(acc)}</div>
+                <div class="hint mono" style="margin-top:3px;font-size:11px">${esc(acc.uuid || '')}</div>
+              </div>
+            </button>
+            <div class="acc-actions">
+              <button class="btn sm" data-act="account-skins" data-id="${esc(acc.id)}">${icon('skin')} Скин</button>
+              ${acc.type === 'elyby' ? `<button class="btn sm" data-act="account-logout" data-id="${esc(acc.id)}">${icon('logout')} Выйти</button>` : ''}
+              <button class="btn sm danger" data-act="account-remove" data-id="${esc(acc.id)}">Удалить</button>
+            </div>
+          </div>`).join('')}
       </div>`
-    : '';
+    : `<div class="hint" style="margin-bottom:14px">Аккаунтов пока нет. Добавьте Microsoft (официальный аккаунт), Ely.by (скины и ник) или оффлайн-ник.</div>`;
 
   const msBody = state.ms
     ? `<div class="ms-code" style="margin-top:12px;padding:14px;border:1px solid var(--navy-600);border-radius:12px;background:rgba(0,120,212,.06)">
@@ -1262,8 +1279,20 @@ function viewAccount() {
 
   return `
     <h1 class="page-title">Аккаунт</h1>
-    <p class="page-sub">Войдите через Microsoft (официальный аккаунт), Ely.by (скины и ник) или играйте оффлайн. Токены аккаунтов зашифрованы на диске и не отдаются интерфейсу — украсть их копией файла не получится.</p>
-    ${current}
+    <p class="page-sub">Мультиаккаунтинг: добавляйте несколько аккаунтов и переключайтесь между ними. Выбранный аккаунт используется при запуске Java-сборок. Токены зашифрованы на диске и не отдаются интерфейсу.</p>
+    ${a ? `<div class="card" style="margin-bottom:18px">
+        <div class="current-acc">
+          <div class="big-avatar">${esc(a.username.charAt(0).toUpperCase())}</div>
+          <div class="grow">
+            <div style="font-size:18px;font-weight:900">${esc(a.username)}</div>
+            <div class="hint">${accTypeHint(a)}</div>
+            <div class="hint mono" style="margin-top:4px;font-size:11px">UUID ${esc(a.uuid)}</div>
+          </div>
+          <button class="btn primary" data-act="account-skins" data-id="${esc(a.id)}">${icon('skin')} Скин</button>
+        </div>
+      </div>` : ''}
+    ${accountCards}
+    <h2 class="section-title" style="margin-top:26px">Добавить аккаунт</h2>
     <div class="acc-grid">
       <div class="card">
         <div class="acc-head"><div class="big-avatar" style="font-size:20px">M</div>
@@ -1289,6 +1318,83 @@ function viewAccount() {
         <div class="hint" style="margin-top:12px">Ник от 3 до 16 символов: латиница, цифры и «_». Скины в оффлайне не работают.</div>
       </div>
     </div>`;
+}
+
+/* ================= Скины ================= */
+
+const SKIN_SOURCE_LABEL = { elyby: 'Ely.by', mojang: 'Mojang', littleskin: 'LittleSkin' };
+
+function viewSkins() {
+  const s = state.skins;
+  const a = state.account;
+  const canApply = a && (a.type === 'microsoft' || a.type === 'elyby');
+
+  const current = s.currentUrl
+    ? `<div class="card" style="margin-bottom:16px">
+        <div class="row" style="align-items:center;gap:14px">
+          <img src="${esc(s.currentUrl)}" alt="скин" class="skin-preview broken-img">
+          <div class="grow">
+            <div style="font-weight:900">Текущий скин</div>
+            <div class="hint">${a ? esc(a.username) + ' · ' + accTypeLabel(a.type) : 'аккаунт не выбран'}</div>
+            <div class="hint mono" style="font-size:11px">${esc(s.currentUrl)}</div>
+          </div>
+        </div>
+      </div>`
+    : `<div class="hint" style="margin-bottom:16px">${a ? 'Скин аккаунта отобразится здесь.' : 'Выберите аккаунт во вкладке «Аккаунт».'}</div>`;
+
+  const modelRow = a && a.type === 'microsoft'
+    ? `<div class="row" style="margin:12px 0">
+        <label class="hint" style="margin:0">Модель:</label>
+        <button class="btn sm ${s.model === 'classic' ? 'primary' : ''}" data-act="skin-model" data-model="classic">Classic</button>
+        <button class="btn sm ${s.model === 'slim' ? 'primary' : ''}" data-act="skin-model" data-model="slim">Slim</button>
+      </div>`
+    : '';
+
+  const applyRow = canApply
+    ? `<div class="row" style="margin:12px 0">
+        <button class="btn primary" data-act="skin-apply-file">Загрузить файл скина</button>
+        <button class="btn" data-act="skin-apply-url-prompt">По ссылке</button>
+        ${a.type === 'elyby' ? `<button class="btn" data-act="skin-open-ely">Открыть скин на ely.by</button>` : ''}
+      </div>`
+    : a && a.type === 'offline'
+      ? `<div class="hint" style="margin:12px 0">У оффлайн-аккаунта скина нет: войдите через Microsoft или Ely.by.</div>`
+      : `<div class="hint" style="margin:12px 0">Выберите аккаунт Microsoft или Ely.by во вкладке «Аккаунт».</div>`;
+
+  const results = s.items.length
+    ? `<div class="skin-grid">
+        ${s.items.map(it => `
+          <div class="skin-card">
+            <img src="${esc(it.url)}" alt="скин" class="broken-img">
+            <div class="skin-meta">
+              <div style="font-weight:700">${esc(it.name)}</div>
+              <div class="hint">${esc(SKIN_SOURCE_LABEL[it.source] || it.source)}</div>
+            </div>
+            <button class="btn sm primary" data-act="skin-pick" data-url="${esc(it.url)}" data-source="${esc(it.source)}">Применить</button>
+          </div>`).join('')}
+      </div>`
+    : s.loading
+      ? `<div class="hint" style="padding:20px">Ищу скины…</div>`
+      : `<div class="hint" style="padding:20px">Введите ник игрока и нажмите «Поиск» — появятся скины этого игрока из каталогов. Нажмите «Применить», чтобы поставить скин себе (для Mojang — напрямую через API, для Ely.by — откроется страница).</div>`;
+
+  return `
+    <h1 class="page-title">Скины</h1>
+    <p class="page-sub">Выберите скин из каталогов ely.by, Mojang и других по нику игрока. Скины можно ставить для аккаунтов Microsoft (официальный API) и Ely.by.</p>
+    ${current}
+    <div class="card" style="margin-bottom:16px">
+      <div class="row">
+        <input class="input grow" id="skin-query" placeholder="Ник игрока, например Steve" value="${esc(s.query)}" style="margin:0">
+        <button class="btn primary" data-act="skin-search">${icon('search')} Поиск</button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn sm ${s.source === 'all' ? 'primary' : ''}" data-act="skin-source" data-src="all">Все</button>
+        ${s.sources.map(src => `<button class="btn sm ${s.source === src.id ? 'primary' : ''}" data-act="skin-source" data-src="${esc(src.id)}" style="border-color:${esc(src.color)};color:${esc(src.color)}">${esc(src.label)}</button>`).join('')}
+      </div>
+      ${applyRow}
+      ${modelRow}
+    </div>
+    ${s.error ? `<div class="hint" style="color:var(--danger);margin-bottom:12px">${esc(s.error)}</div>` : ''}
+    ${results}
+    ${s.applying ? `<div class="hint" style="margin-top:12px">Применяю скин…</div>` : ''}`;
 }
 
 /* ================= Настройки ================= */
@@ -1593,8 +1699,10 @@ async function launch() {
 }
 
 function importZip() {
-  return window.ember.instances.importZip().then(async inst => {
-    if (!inst || inst.cancelled) return;
+  return window.ember.instances.importZip().then(async res => {
+    if (!res || res.cancelled) return;
+    const inst = res.instance || res;
+    if (!inst) return;
     toast(`Сборка «${inst.name}» импортирована`, 'ok');
     await reloadInstances();
   }).catch(e => toast(e.message, 'err'));
@@ -1615,6 +1723,10 @@ async function openModsManager(id) {
 }
 
 function setupEvents() {
+  // Broken images (недоступные скины/обложки) не показываем как «галочку» — приглушаем
+  document.addEventListener('error', e => {
+    if (e.target && e.target.tagName === 'IMG') e.target.classList.add('img-broken');
+  }, true);
   window.ember.on('progress', p => {
     state.progress = p;
     renderBusy();
@@ -1655,6 +1767,21 @@ async function reloadSettings() {
   state.settings = await window.ember.settings.get();
 }
 
+// Загружает список аккаунтов и выбирает активный
+async function loadAccounts() {
+  const r = await window.ember.accounts.list();
+  state.accounts = r.accounts || [];
+  state.selectedAccountId = r.selected || null;
+  state.account = state.accounts.find(a => a.id === state.selectedAccountId) || null;
+  // Перезагружаем текущий скин для нового активного аккаунта
+  if (state.account) {
+    try { state.skins.currentUrl = await window.ember.skins.current(state.account.id); }
+    catch (_) { state.skins.currentUrl = null; }
+  } else {
+    state.skins.currentUrl = null;
+  }
+}
+
 document.addEventListener('click', async e => {
   const link = e.target.closest('a');
   if (link) e.preventDefault();
@@ -1663,6 +1790,14 @@ document.addEventListener('click', async e => {
   if (navEl) return setView(navEl.dataset.nav);
   const goEl = e.target.closest('[data-nav-go]');
   if (goEl) return setView(goEl.dataset.navGo);
+  const accDotEl = e.target.closest('[data-act="acc-dot"]');
+  if (accDotEl) {
+    await window.ember.accounts.select(accDotEl.dataset.id);
+    await loadAccounts();
+    renderSidebarFoot();
+    if (state.view === 'home') renderView();
+    return;
+  }
 
   const srcEl = e.target.closest('[data-src]');
   if (srcEl) {
@@ -1946,6 +2081,7 @@ document.addEventListener('click', async e => {
       }
       case 'go-settings': return setView('settings');
       case 'open-cf-keys': return window.ember.openUrl('https://console.curseforge.com/');
+      case 'go-account': return setView('account');
       case 'open-ely-reg': return window.ember.openUrl('https://ely.by/register');
       case 'open-tg': return window.ember.openUrl('https://t.me/EmberLauncher');
       case 'open-ds': return window.ember.openUrl('https://discord.gg/Wpr5kBxUM');
@@ -1956,8 +2092,9 @@ document.addEventListener('click', async e => {
         if (!login || !pass) return toast('Введите логин и пароль Ely.by', 'err');
         t.disabled = true;
         try {
-          state.account = await window.ember.auth.ely(login, pass);
-          toast(`Вход выполнен: ${state.account.username}`, 'ok');
+          const acc = await window.ember.accounts.add('elyby', { login, password: pass });
+          toast(`Вход выполнен: ${acc.username}`, 'ok');
+          await loadAccounts();
         } finally { t.disabled = false; }
         renderSidebarFoot();
         return renderView();
@@ -1965,18 +2102,45 @@ document.addEventListener('click', async e => {
       case 'offline-login': {
         const name = $('#off-name').value.trim();
         try {
-          state.account = await window.ember.auth.offline(name);
-          toast(`Оффлайн-ник: ${state.account.username}`, 'ok');
+          const acc = await window.ember.accounts.add('offline', { name });
+          toast(`Оффлайн-ник: ${acc.username}`, 'ok');
+          await loadAccounts();
         } catch (err) { return toast(err.message, 'err'); }
         renderSidebarFoot();
         return renderView();
       }
       case 'logout': {
-        await window.ember.auth.logout();
-        state.account = null;
+        if (state.account) await window.ember.accounts.logout(state.account.id).catch(() => {});
+        await loadAccounts();
         toast('Вы вышли из аккаунта');
         renderSidebarFoot();
         return renderView();
+      }
+
+      case 'account-select': {
+        await window.ember.accounts.select(t.dataset.id);
+        await loadAccounts();
+        renderSidebarFoot();
+        return renderView();
+      }
+      case 'account-remove': {
+        if (!confirm('Удалить этот аккаунт из лаунчера?')) return;
+        await window.ember.accounts.remove(t.dataset.id);
+        await loadAccounts();
+        toast('Аккаунт удалён');
+        renderSidebarFoot();
+        return renderView();
+      }
+      case 'account-logout': {
+        await window.ember.accounts.logout(t.dataset.id).catch(() => {});
+        await loadAccounts();
+        return renderView();
+      }
+      case 'account-skins': {
+        await window.ember.accounts.select(t.dataset.id);
+        await loadAccounts();
+        renderSidebarFoot();
+        return setView('skins');
       }
 
       case 'ms-login': {
@@ -1987,8 +2151,8 @@ document.addEventListener('click', async e => {
           renderView();
           const acc = await window.ember.auth.msWait();
           state.ms = null;
-          state.account = acc;
           toast(`Вход выполнен: ${acc.username}`, 'ok');
+          await loadAccounts();
         } catch (err) {
           state.ms = null;
           toast(err.message || 'Не удалось войти через Microsoft', 'err');
@@ -2012,6 +2176,97 @@ document.addEventListener('click', async e => {
         state.ms = null;
         toast('Вход отменён');
         return renderView();
+      }
+
+      case 'skin-source': {
+        state.skins.source = t.dataset.src;
+        return renderView();
+      }
+      case 'skin-search': {
+        const q = $('#skin-query').value.trim();
+        if (!q) return toast('Введите ник игрока', 'err');
+        state.skins.query = q;
+        state.skins.loading = true;
+        state.skins.error = '';
+        state.skins.items = [];
+        renderView();
+        try {
+          const items = await window.ember.skins.search(state.skins.source, q);
+          state.skins.items = items;
+        } catch (err) {
+          state.skins.error = err.message;
+        } finally {
+          state.skins.loading = false;
+          renderView();
+        }
+        return;
+      }
+      case 'skin-model': {
+        state.skins.model = t.dataset.model;
+        return renderView();
+      }
+      case 'skin-apply-file': {
+        if (!state.account) return toast('Выберите аккаунт во вкладке «Аккаунт»', 'err');
+        const file = await window.ember.skins.pickImage();
+        if (!file) return;
+        state.skins.applying = true;
+        renderView();
+        try {
+          const r = await window.ember.skins.apply(state.account.id, { file, model: state.skins.model });
+          toast(r.message || 'Скин установлен', 'ok');
+          if (state.account.type === 'elyby') state.skins.currentUrl = `https://ely.by/skin/${encodeURIComponent(state.account.username)}`;
+        } catch (err) {
+          toast(err.message, 'err');
+        } finally {
+          state.skins.applying = false;
+          renderView();
+        }
+        return;
+      }
+      case 'skin-apply-url-prompt': {
+        if (!state.account) return toast('Выберите аккаунт во вкладке «Аккаунт»', 'err');
+        const url = prompt('Ссылка на скин (PNG):', 'https://');
+        if (!url) return;
+        state.skins.applying = true;
+        renderView();
+        try {
+          const r = await window.ember.skins.apply(state.account.id, { url, model: state.skins.model });
+          toast(r.message || 'Скин установлен', 'ok');
+        } catch (err) {
+          toast(err.message, 'err');
+        } finally {
+          state.skins.applying = false;
+          renderView();
+        }
+        return;
+      }
+      case 'skin-pick': {
+        if (!state.account) return toast('Сначала выберите аккаунт во вкладке «Аккаунт»', 'err');
+        const url = t.dataset.url;
+        state.skins.applying = true;
+        renderView();
+        try {
+          if (t.dataset.source === 'mojang' && state.account.type === 'microsoft') {
+            const r = await window.ember.skins.apply(state.account.id, { url, model: state.skins.model });
+            toast(r.message || 'Скин установлен', 'ok');
+          } else if (state.account.type === 'elyby') {
+            await window.ember.openUrl(`https://ely.by/skin/${encodeURIComponent(state.account.username)}`);
+            toast('Открыл страницу скина на ely.by — поставьте скин там', 'ok');
+          } else {
+            await window.ember.openUrl(url);
+            toast('Открыл скин в браузере', 'ok');
+          }
+        } catch (err) {
+          toast(err.message, 'err');
+        } finally {
+          state.skins.applying = false;
+          renderView();
+        }
+        return;
+      }
+      case 'skin-open-ely': {
+        if (!state.account) return toast('Выберите аккаунт', 'err');
+        return window.ember.openUrl(`https://ely.by/skin/${encodeURIComponent(state.account.username)}`);
       }
 
       case 'save-settings': return saveSettings();
@@ -2131,7 +2386,9 @@ document.addEventListener('keydown', e => {
 async function boot() {
   state.info = await window.ember.info();
   state.settings = await window.ember.settings.get();
-  state.account = state.settings.account;
+  await loadAccounts();
+  // Каталоги скинов
+  try { state.skins.sources = await window.ember.skins.sources(); } catch (_) { state.skins.sources = []; }
   state.musicFolder = await window.ember.music.folder();
   applyAnimations();
   applyLite();
