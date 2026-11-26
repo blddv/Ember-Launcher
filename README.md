@@ -66,9 +66,9 @@ npm start
 
 | Платформа | Команда | Результат |
 | --- | --- | --- |
-| Windows | `npm run dist` | `dist/EMBER Launcher Setup 2.2.4.exe` (NSIS) |
-| Linux | `npm run dist:linux` | `EMBER-Launcher-2.2.4-linux-x86_64.AppImage`, `-linux-amd64.deb`, `-linux-x64.tar.gz` |
-| macOS | `npm run dist:mac` | `EMBER-Launcher-2.2.4-mac-x64.zip` (Intel) и `EMBER-Launcher-2.2.4-mac-arm64.zip` (Apple Silicon), DMG — только на macOS |
+| Windows | `npm run dist` | `dist/EMBER Launcher Setup 2.2.4B.exe` (NSIS) |
+| Linux | `npm run dist:linux` | `EMBER-Launcher-2.2.4B-linux-x86_64.AppImage`, `-linux-amd64.deb`, `-linux-x64.tar.gz` |
+| macOS | `npm run dist:mac` | `EMBER-Launcher-2.2.4B-mac-x64.zip` (Intel) и `EMBER-Launcher-2.2.4B-mac-arm64.zip` (Apple Silicon), DMG — только на macOS |
 
 Сборка Windows-установщика на Linux требует Wine (с 32-битной частью) для редактирования ресурсов exe. Сборка DMG выполняется на macOS (или через workflow `build-all.yml` в GitHub Actions). Zip-сборки macOS без подписи: при первом запуске щёлкните правой кнопкой → «Открыть».
 
@@ -125,7 +125,7 @@ echo "$XDG_SESSION_TYPE | WAYLAND_DISPLAY=$WAYLAND_DISPLAY | ELECTRON_OZONE_PLAT
 # если не помогло — закрыть лаунчер клавиатурой (Alt+F4) и запустить заново
 
 # запустить через XWayland (для AppImage / deb-бинарника / исходников)
-./EMBER-Launcher-2.2.4-linux-x86_64.AppImage --ozone-platform=x11
+./EMBER-Launcher-2.2.4B-linux-x86_64.AppImage --ozone-platform=x11
 npm start -- --ozone-platform=x11
 ```
 
