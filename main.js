@@ -20,6 +20,7 @@ const http = require('./src/http');
 const crash = require('./src/crash');
 const secure = require('./src/secure');
 const skins = require('./src/skins');
+const updater = require('./src/updater');
 
 // ===== Linux / KDE Plasma: бэкенд окна и способ его перетаскивания =====
 // Electron 31 под нативным Wayland + KWin (Plasma 6) может потерять ввод:
@@ -447,6 +448,7 @@ function bootstrap() {
     loaders: instances.LOADERS,
     javaLoaders: instances.JAVA_LOADERS,
     rustPlatforms: rust.list(),
+    releaseRepo: updater.GITHUB_REPO,
   }));
 
   ipcMain.handle('dataDir:change', async () => {
@@ -759,6 +761,41 @@ function bootstrap() {
     return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
   });
 
+  // ── Автообновление: проверка, загрузка, установка ──
+  ipcMain.handle('update:check', async () => {
+    const token = store.get('githubToken') || '';
+    try {
+      return await updater.checkForUpdate(app.getVersion(), { token });
+    } catch (e) {
+      return { ok: false, error: http.humanizeError(e) };
+    }
+  });
+
+  ipcMain.handle('update:download', async (_e, asset) => {
+    const info = await updater.checkForUpdate(app.getVersion(), { token: store.get('githubToken') || '' });
+    const r = await updater.downloadUpdate(asset, {
+      checksums: info.checksums || '',
+      onProgress: (received, total) => send('update:progress', { received, total }),
+    });
+    return { ok: true, ...r };
+  });
+
+  ipcMain.handle('update:install', (_e, { file, assetName }) => {
+    const r = updater.installUpdate({
+      platform: process.platform,
+      appImagePath: process.env.APPIMAGE || '',
+      assetName: assetName || '',
+    }, { file });
+    // После автоматической установки перезапускаем лаунчер, чтобы запустить новую версию
+    if (r.ok && (r.method === 'nsis' || r.method === 'appimage')) {
+      setTimeout(() => {
+        try { app.relaunch(); } catch (_) { /* не получилось — пользователь перезапустит сам */ }
+        app.exit(0);
+      }, 1200);
+    }
+    return r;
+  });
+
   // Импорт mrpack / CurseForge-сборки из локального zip
   ipcMain.handle('import:zip', async () => {
     const r = await dialog.showOpenDialog(win, {
@@ -863,6 +900,15 @@ app.whenReady().then(() => {
   createWindow();
   createTray();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+
+  // Автопроверка обновлений в фоне: результат отправляется в интерфейс,
+  // если найдётся новая версия — пользователь скачает и установит из настроек.
+  setTimeout(async () => {
+    try {
+      const info = await updater.checkForUpdate(app.getVersion(), { token: store.get('githubToken') || '' });
+      send('update:available', info);
+    } catch (_) { /* нет сети / лимит GitHub — в интерфейсе кнопка «Проверить» перепроверит */ }
+  }, 4000);
 });
 
 app.on('window-all-closed', () => {

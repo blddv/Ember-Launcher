@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 const inv = (ch, ...args) => ipcRenderer.invoke(ch, ...args);
-const EVENTS = ['progress', 'log', 'game:state', 'mod:status'];
+const EVENTS = ['progress', 'log', 'game:state', 'mod:status', 'update:available', 'update:progress'];
 
 contextBridge.exposeInMainWorld('ember', {
   info: () => inv('app:info'),
@@ -88,6 +88,11 @@ contextBridge.exposeInMainWorld('ember', {
     current: (accountId) => inv('skins:current', { accountId }),
     apply: (accountId, opts) => inv('skins:apply', { accountId, ...opts }),
     pickImage: () => inv('skins:pickImage'),
+  },
+  update: {
+    check: () => inv('update:check'),
+    download: asset => inv('update:download', asset),
+    install: (file, assetName) => inv('update:install', { file, assetName }),
   },
   copyText: text => inv('clipboard:copy', text),
   search: (source, opts) => inv('search', { source, ...opts }),
