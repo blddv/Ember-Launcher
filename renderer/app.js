@@ -122,6 +122,7 @@ const state = {
   rustError: '',
   rustCache: {},
   skins: { sources: [], source: 'elyby', query: '', items: [], catalog: [], loading: false, error: '', current: null, urlInput: '', applying: false, model: 'classic' },
+  update: { checking: false, available: false, current: '', latest: '', url: '', asset: null, error: '', downloading: false, progress: null, downloaded: false, downloadedPath: '', installing: false, savedLatest: '' },
 };
 
 // platform: java — источники Java Edition, rust — только для Minecraft на Rust.
@@ -1461,6 +1462,35 @@ function viewSettings() {
         <span>${esc(PERF_DESC[p])}</span>
       </label>`).join('');
 
+  const u = state.update;
+  const updateCard = `
+    <div class="card span-2" id="update-card">
+      <h3>Обновления <small>проверка релизов на GitHub</small></h3>
+      <div class="hint" style="margin-bottom:10px">Лаунчер проверяет релизы ${esc(state.info && state.info.releaseRepo || 'blddv/Ember-Launcher')} и ставит новую версию: Windows — тихо, Linux — замена AppImage, иначе открыть установщик.</div>
+      ${u.error ? `<div class="note warn">${esc(u.error)}</div>` : ''}
+      <div class="row" style="align-items:center">
+        <div class="grow">
+          <b>${u.current || (state.info ? state.info.version : '')}</b>
+          ${u.available ? `<span class="chip ok" style="margin-left:8px"><span class="dot"></span>Доступна ${esc(u.latest)}</span>`
+            : u.latest ? `<span class="chip" style="margin-left:8px"><span class="dot"></span>Актуальная ${esc(u.latest)}</span>`
+            : '<span class="hint" style="margin-left:8px">проверка не выполнена</span>'}
+        </div>
+        ${u.checking ? '<span class="hint">Проверяю…</span>'
+          : u.downloading
+            ? '<span class="hint">Загрузка обновления…</span>'
+            : `<button class="btn" data-act="update-check">${icon('refresh')} Проверить обновления</button>`}
+      </div>
+      ${u.downloading ? `<div class="progress" style="margin-top:14px"><div class="meta"><span>Загрузка</span><b>${u.progress && u.progress.total ? Math.min(100, Math.round((u.progress.received / u.progress.total) * 100)) : ''}%</b></div><div class="bar"><i style="width:${u.progress && u.progress.total ? Math.min(100, Math.round((u.progress.received / u.progress.total) * 100)) : 30}%"></i></div></div>` : ''}
+      ${u.available ? `<div class="row" style="margin-top:12px">
+        ${u.downloaded
+          ? `<button class="btn primary" data-act="update-install">${icon('check')} Установить ${esc(u.latest)} и перезапустить</button>
+             <button class="btn" data-act="update-open">${icon('folder')} Открыть файл</button>`
+          : `<button class="btn primary" data-act="update-download" ${u.downloading ? 'disabled' : ''}>${icon('download')} Скачать ${esc(u.latest)}</button>`}
+        ${u.url ? `<a href="#" data-act="update-release">Открыть релиз на GitHub</a>` : ''}
+      </div>` : ''}
+      ${!u.available && u.latest ? `<div class="hint" style="margin-top:8px">Загрузка и установка: лаунчер ставит обновление и перезапускается автоматически.</div>` : ''}
+    </div>`;
+
   return `
     <h1 class="page-title">Настройки</h1>
     <p class="page-sub">Производительность, окно, источники модов, Orange Visuals и папка данных.</p>
@@ -1521,6 +1551,7 @@ function viewSettings() {
           <div class="hint">Бесплатный ключ: <a href="#" data-act="open-cf-keys">console.curseforge.com</a>. Modrinth, Hangar и Smithed работают без ключа.</div>
         </div>
       </div>
+      ${updateCard}
       <div class="card span-2">
         <h3>Orange Visuals <small>собственный мод EMBER · Minecraft 1.21.1 Fabric</small></h3>
         <div class="hint" style="margin-bottom:10px">Мод работает внутри игры: HUD, плавный зум на C, визуальные фильтры и музыка из выбранной папки. Меню открывается коротким нажатием клавиши меню (по умолчанию R Shift). Миникарта, полная карта (N) и метки настраиваются в этом же меню. Здесь задаются стартовые значения; в уже созданной сборке визуалы меняются в игре и сохраняются.</div>
@@ -1699,6 +1730,88 @@ async function installPerfPack() {
   }
 }
 
+/* ================= Автообновление ================= */
+
+async function checkUpdate() {
+  state.update.checking = true;
+  state.update.error = '';
+  renderView();
+  try {
+    const r = await window.ember.update.check();
+    if (r.ok === false) {
+      state.update.error = r.error || 'Не удалось проверить обновления';
+    } else {
+      state.update.current = r.current || state.update.current;
+      state.update.latest = r.latest || '';
+      state.update.url = r.url || '';
+      state.update.available = !!r.available;
+      state.update.asset = r.asset || null;
+      state.update.downloaded = false;
+      state.update.downloadedPath = '';
+      if (!r.available && r.latest) state.update.error = '';
+      if (r.available) toast(`Доступна версия ${r.latest}`, 'ok');
+    }
+  } catch (e) {
+    state.update.error = e.message || String(e);
+  } finally {
+    state.update.checking = false;
+    renderView();
+  }
+}
+
+async function downloadUpdate() {
+  const asset = state.update.asset;
+  if (!asset) return checkUpdate();
+  state.update.downloading = true;
+  state.update.error = '';
+  renderView();
+  try {
+    const r = await window.ember.update.download(asset);
+    state.update.downloaded = true;
+    state.update.downloadedPath = r.path;
+    toast('Обновление скачано — установите его', 'ok');
+  } catch (e) {
+    state.update.error = e.message || String(e);
+    toast(state.update.error, 'err');
+  } finally {
+    state.update.downloading = false;
+    renderView();
+  }
+}
+
+async function installUpdate() {
+  if (!state.update.downloadedPath) return toast('Сначала скачайте обновление', 'err');
+  state.update.installing = true;
+  renderView();
+  try {
+    const r = await window.ember.update.install(state.update.downloadedPath, state.update.asset && state.update.asset.name);
+    if (r.ok) toast(r.message, 'ok');
+    else toast(r.message || 'Не удалось установить обновление', 'err');
+  } catch (e) {
+    toast(e.message || String(e), 'err');
+  } finally {
+    state.update.installing = false;
+    renderView();
+  }
+}
+
+function applyUpdateState(info) {
+  if (!info) return;
+  state.update.current = info.current || state.update.current;
+  state.update.latest = info.latest || '';
+  state.update.url = info.url || '';
+  state.update.available = !!info.available;
+  state.update.asset = info.asset || null;
+  state.update.error = '';
+  // Если версия поменялась — старый скачанный файл больше не подходит
+  if (state.update.latest && state.update.latest !== (state.update.savedLatest || '')) {
+    state.update.downloaded = false;
+    state.update.downloadedPath = '';
+  }
+  state.update.savedLatest = state.update.latest;
+  if (state.view === 'settings') renderView();
+}
+
 function applyLite() {
   document.body.classList.toggle('lite', (state.settings.perf || {}).preset === 'potato');
 }
@@ -1824,6 +1937,15 @@ function setupEvents() {
   window.ember.on('mod:status', m => {
     state.mod = m;
     if (state.view === 'home') renderView();
+  });
+  // Автопроверка при запуске и прогресс загрузки обновления
+  window.ember.on('update:available', info => {
+    applyUpdateState(info);
+    if (info && info.available) toast(`Доступна версия ${info.latest}`, 'ok');
+  });
+  window.ember.on('update:progress', p => {
+    state.update.progress = p;
+    if (state.view === 'settings') renderView();
   });
 }
 
@@ -2358,6 +2480,14 @@ document.addEventListener('click', async e => {
       }
 
       case 'save-settings': return saveSettings();
+      case 'update-check': return checkUpdate();
+      case 'update-download': return downloadUpdate();
+      case 'update-install': return installUpdate();
+      case 'update-open': {
+        const f = state.update.downloadedPath;
+        return f ? window.ember.showFile(f) : toast('Сначала скачайте обновление', 'err');
+      }
+      case 'update-release': return state.update.url && window.ember.openUrl(state.update.url);
       case 'perf-apply': return applyPerf();
       case 'perf-install': return installPerfPack();
       case 'pick-java': {

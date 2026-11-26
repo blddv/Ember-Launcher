@@ -9,6 +9,7 @@
   "license": "SEE LICENSE IN LICENSE",
   "scripts": {
     "start": "electron .",
+    "test": "node --test test/*.test.js",
     "dist": "electron-builder --win --x64",
     "dist:linux": "electron-builder --linux --x64",
     "dist:mac": "electron-builder --mac"
