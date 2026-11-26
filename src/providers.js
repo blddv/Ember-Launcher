@@ -8,6 +8,7 @@ const store = require('./store');
 const instances = require('./instances');
 const managed = require('./managed');
 const installed = require('./installed');
+const horizon = require('./horizon');
 const { label, MR_LOADER, CF_LOADER, LABEL } = require('./loaders');
 
 const MR = 'https://api.modrinth.com/v2';
@@ -27,9 +28,13 @@ function safeJoin(base, rel) {
 }
 
 // Для модов нужен загрузчик. Ванильная сборка модов не запускает, поэтому не ищем и не ставим.
+// Сборки Minecraft на Rust сюда не относятся: у них свои источники модов (см. horizon.js).
 function requireLoader(inst, kind) {
   if (kind !== 'mod') return null;
   if (!inst) throw new Error('Выберите сборку с загрузчиком (Fabric, Quilt, Forge или NeoForge)');
+  if (instances.isRust(inst)) {
+    throw new Error(`«${inst.name}» — сборка Minecraft на Rust: Java-моды в неё не ставятся. Откройте источник «Horizon»`);
+  }
   if (!MR_LOADER[inst.loader]) throw new Error(`В сборке «${inst.name}» нет загрузчика модов. Создайте сборку с Fabric, Quilt, Forge или NeoForge`);
   return inst.loader;
 }
@@ -110,6 +115,7 @@ async function installMrpack(file, nameFallback) {
   const index = JSON.parse(zip.readAsText('modrinth.index.json'));
   const deps = index.dependencies || {};
   const mc = deps.minecraft;
+  if (!mc) throw new Error('В .mrpack не указана версия Minecraft');
   let loader = 'vanilla';
   let loaderVersion = '';
   const map = [['fabric-loader', 'fabric'], ['quilt-loader', 'quilt'], ['forge', 'forge'], ['neoforge', 'neoforge']];
@@ -118,10 +124,13 @@ async function installMrpack(file, nameFallback) {
   }
   const inst = instances.create({ name: index.name || nameFallback, version: mc, loader, loaderVersion });
   const dir = instances.getGameDir(inst);
-  const files = index.files.filter(f => !(f.env && f.env.client === 'unsupported'));
+  const files = (index.files || []).filter(f => !(f.env && f.env.client === 'unsupported'));
+  if (!files.length) throw new Error('В .mrpack нет файлов для клиента');
   await pool(files, 6, f => {
+    const url = (Array.isArray(f.downloads) && f.downloads[0]) || f.url;
+    if (!url) throw new Error(`У файла ${f.path} нет ссылки для скачивания`);
     const dest = safeJoin(dir, f.path);
-    return downloadFile(f.downloads[0], dest, { sha1: f.hashes && f.hashes.sha1 });
+    return downloadFile(url, dest, { sha1: f.hashes && f.hashes.sha1 });
   });
   extractOverrides(zip, dir, ['overrides/', 'client-overrides/']);
   return inst;
@@ -225,6 +234,11 @@ async function installCurseForgeModpack(modId) {
   const dest = path.join(dirs.tmp, `cf-${f.id}.zip`);
   await downloadFile(cfDownloadUrl(f), dest);
   const zip = new AdmZip(dest);
+  return cfModpackFromZip(zip);
+}
+
+// Общая часть установки CurseForge-сборки: принимает уже открытый архив с manifest.json.
+async function cfModpackFromZip(zip) {
   const manifest = JSON.parse(zip.readAsText('manifest.json'));
   const mc = manifest.minecraft.version;
   const ml = (manifest.minecraft.modLoaders || []).find(x => x.primary) || (manifest.minecraft.modLoaders || [])[0];
@@ -241,15 +255,28 @@ async function installCurseForgeModpack(modId) {
   const dir = instances.getGameDir(inst);
   const modsDir = path.join(dir, 'mods');
 
-  const ids = manifest.files.filter(x => x.required !== false).map(x => x.fileID);
-  const resolved = [];
-  for (let i = 0; i < ids.length; i += 50) {
-    const r = await fetchJson(`${CF}/mods/files`, { method: 'POST', headers: cfHeaders(), json: { fileIds: ids.slice(i, i + 50) } });
-    resolved.push(...r.data);
+  const ids = (manifest.files || []).filter(x => x.required !== false).map(x => x.fileID);
+  if (ids.length) {
+    const resolved = [];
+    for (let i = 0; i < ids.length; i += 50) {
+      const r = await fetchJson(`${CF}/mods/files`, { method: 'POST', headers: cfHeaders(), json: { fileIds: ids.slice(i, i + 50) } });
+      resolved.push(...r.data);
+    }
+    await pool(resolved, 6, f2 => downloadFile(cfDownloadUrl(f2), path.join(modsDir, f2.fileName), { sha1: sha1Of(f2) }));
+  } else {
+    // Старые сборки держат моды прямо в архиве (папка overrides/mods)
+    const e = zip.getEntry('overrides/mods/');
+    if (e) extractOverrides(zip, dir, ['overrides/']);
   }
-  await pool(resolved, 6, f2 => downloadFile(cfDownloadUrl(f2), path.join(modsDir, f2.fileName), { sha1: sha1Of(f2) }));
   extractOverrides(zip, dir, [manifest.overrides ? manifest.overrides + '/' : 'overrides/']);
   return inst;
+}
+
+// Импорт CurseForge-сборки из скачанного .zip файла (кнопка «Импорт CurseForge»).
+async function installCurseForgeModpackFile(file) {
+  const zip = new AdmZip(file);
+  if (!zip.getEntry('manifest.json')) throw new Error('Это не архив CurseForge: внутри нет manifest.json');
+  return cfModpackFromZip(zip);
 }
 
 /* ================= HANGAR (плагины Paper) ================= */
@@ -327,6 +354,29 @@ async function installSmithed(inst, item) {
   return { installed: [fileName], note };
 }
 
+/* ================= HORIZON (Minecraft на Rust) ================= */
+
+// Моды Horizon ставятся только в сборку Horizon: это другой движок и другой формат (.hmod)
+function requireRust(inst) {
+  if (!inst) throw new Error('Выберите сборку Horizon во вкладке «Сборки»');
+  const platform = instances.platformOf(inst);
+  if (platform === 'rustcraft') {
+    throw new Error('Rustcraft не поддерживает моды. Создайте сборку Horizon — у него свой реестр модов');
+  }
+  if (platform !== 'horizon') {
+    throw new Error(`«${inst.name}» — сборка Java Edition. Моды для Minecraft на Rust работают только в Horizon`);
+  }
+  return inst;
+}
+
+async function horizonSearch(opts = {}) {
+  return horizon.search({ query: opts.query || '', kind: opts.kind || 'mod', offset: opts.offset || 0 });
+}
+
+async function horizonGithubSearch(opts = {}) {
+  return horizon.githubSearch({ query: opts.query || '', offset: opts.offset || 0 });
+}
+
 /* ================= GITHUB (релизы с .jar) ================= */
 
 const GH = 'https://api.github.com';
@@ -388,9 +438,46 @@ async function installLink(url, inst) {
     return { instance: await installMrpack(tmp, name.replace(/\.mrpack$/i, '')) };
   }
   if (!inst) throw new Error('Выберите сборку, в которую ставить файл');
+
+  // Minecraft на Rust: свои форматы, Java-файлы не подходят
+  if (instances.isRust(inst)) {
+    const platform = instances.platformOf(inst);
+    if (ext === '.hmod' || ext === '.hnmod') {
+      if (platform !== 'horizon') throw new Error('Rustcraft не поддерживает моды. Нужна сборка Horizon');
+      const modsDir = path.join(instances.getGameDir(inst), 'horizon-mods');
+      await fsp.mkdir(modsDir, { recursive: true });
+      const tmp = path.join(dirs.tmp, `link-${Date.now()}-${name}`);
+      await downloadFile(url, tmp);
+      // Настоящий id берём из horizon-mod.toml внутри .hmod, а не из имени файла
+      const manifest = horizon.readModManifest(tmp);
+      const id = (manifest && manifest.id) || name.replace(/\.(hmod|hnmod)$/i, '');
+      const dest = `${id}${ext}`;
+      await fsp.rename(tmp, path.join(modsDir, dest));
+      horizon.registerExternal(inst, {
+        id, file: dest,
+        title: (manifest && manifest.name) || id,
+        version: (manifest && manifest.version) || '',
+      });
+      return { installed: [dest], note: 'Файл не из реестра Horizon: мод включён, но никто его не проверял' };
+    }
+    if (ext === '.hpack') {
+      throw new Error('Сборки .hpack ставятся из реестра Horizon: вкладка «Моды и сборки», источник «Horizon»');
+    }
+    if (ext === '.zip') {
+      const dir = path.join(instances.getGameDir(inst), 'resourcepacks');
+      await fsp.mkdir(dir, { recursive: true });
+      await downloadFile(url, path.join(dir, name));
+      return { installed: [name], note: 'Ресурспак положен в сборку: включите его в игре' };
+    }
+    throw new Error('Для сборок Minecraft на Rust поддерживаются .hmod (моды), .zip (ресурспаки) и .hpack (сборки)');
+  }
+
   let folder;
   if (ext === '.jar') folder = 'mods';
   else if (ext === '.zip') folder = 'resourcepacks';
+  else if (ext === '.hmod' || ext === '.hnmod' || ext === '.hpack') {
+    throw new Error('Это файл для Minecraft на Rust. Выберите сборку Horizon');
+  }
   else throw new Error('Поддерживаются файлы .jar (моды), .zip (ресурспаки) и .mrpack (сборки)');
   if (folder === 'mods') requireLoader(inst, 'mod');
   const dir = path.join(instances.getGameDir(inst), folder);
@@ -413,6 +500,8 @@ async function search(source, opts = {}) {
 
   let data;
   if (source === 'modrinth') data = await mrSearch(opts);
+  else if (source === 'horizon') data = await horizonSearch(opts);
+  else if (source === 'horizon-github') data = await horizonGithubSearch(opts);
   else if (source === 'curseforge') data = await cfSearch(opts);
   else if (source === 'hangar') data = await hangarSearch(opts);
   else if (source === 'smithed') data = await smithedSearch(opts);
@@ -434,6 +523,10 @@ const OUTDATED_TTL = 10 * 60 * 1000;
 async function installStates(inst, items) {
   const out = {};
   if (!inst || !Array.isArray(items)) return out;
+  // Моды Minecraft на Rust считаются по файлам horizon-mods и записям реестра
+  if (instances.isRust(inst)) {
+    return horizon.states(inst, items).catch(() => ({}));
+  }
   const jars = installed.scanJars(inst);
   const recs = installed.validRecords(inst, jars);
   const loader = MR_LOADER[inst.loader] || null;
@@ -493,6 +586,15 @@ async function updateModrinth(instance, item) {
 }
 
 async function install(item, instance, opts = {}) {
+  if (item.source === 'horizon') {
+    if (item.kind === 'modpack') return horizon.installPack(item.id);
+    requireRust(instance);
+    return horizon.install(instance, item);
+  }
+  if (item.source === 'horizon-github') {
+    requireRust(instance);
+    return horizon.installGithub(instance, item);
+  }
   if (item.source === 'modrinth') {
     if (item.kind === 'modpack') return { instance: await installModrinthModpack(item.id) };
     await guardDuplicate(instance, item, opts);
@@ -513,4 +615,7 @@ async function install(item, instance, opts = {}) {
   throw new Error('Неизвестный источник');
 }
 
-module.exports = { search, install, installStates, installMrpack, installModrinthFiles, FABRIC_API_ID, safeJoin, label };
+module.exports = {
+  search, install, installStates, installMrpack, installModrinthFiles, FABRIC_API_ID, safeJoin, label,
+  horizonSearch, horizonGithubSearch, requireRust, installCurseForgeModpackFile,
+};

@@ -68,6 +68,12 @@ async function syncOrangeVisuals(inst, report = () => {}) {
   const jar = path.join(modsDir, MOD_JAR);
   const cfgFile = path.join(gameDir, 'config', CONFIG_FILE);
 
+  // Minecraft на Rust не запускает Java-моды: Orange Visuals туда не ставится
+  if (instances.isRust(inst)) {
+    await fsp.rm(jar, { force: true });
+    return { active: false, reason: 'Orange Visuals — только для Minecraft Java Edition' };
+  }
+
   if (!cfg.enabled) {
     await fsp.rm(jar, { force: true });
     return { active: false, reason: 'выключен в настройках' };

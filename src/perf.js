@@ -16,12 +16,13 @@ const PRESETS = {
   },
   optimized: {
     label: 'Оптимизировано',
-    desc: 'Дистанция прорисовки 10, умеренные частицы, FPS до 120, лёгкие моды-оптимизаторы.',
+    desc: 'Дистанция прорисовки 10, умеренные частицы, FPS до 120, лёгкие моды-оптимизаторы, '
+      + 'Iris и встроенные шейдеры.',
   },
   potato: {
     label: 'Очень оптимизировано',
     desc: 'Для слабых ПК: дистанция 4, быстрая графика без теней и облаков, 60 FPS, '
-      + 'SerialGC и лёгкий JIT, моды-оптимизаторы.',
+      + 'стабильный G1-сборщик мусора, моды-оптимизаторы, Iris и встроенные шейдеры.',
   },
 };
 
@@ -44,7 +45,7 @@ const OPTIONS = {
   },
   potato: {
     renderDistance: 4,
-    simulationDistance: 5,
+    simulationDistance: 4,
     graphicsMode: 0,
     particles: 2,
     mipmapLevels: 0,
@@ -64,25 +65,27 @@ const OPTIONS = {
 // Пакет оптимизации под загрузчик. Состав проверен по Modrinth для 1.21.1 и 26.3.
 // Sodium-подобные моды не смешиваются: на NeoForge берём Sodium, а не Embeddium и Radium (конфликтуют).
 // Для Forge 1.21.1 Sodium-подобного мода на Modrinth нет, поэтому пакет короче.
+// Iris ставится вместе с пакетом: к нему прикладываются встроенные шейдерпаки (папка shaders).
 // Моды, которых нет для текущей версии Minecraft, пропускаются без ошибки (см. installPack).
 const PACK = {
   fabric: ['sodium', 'lithium', 'ferrite-core', 'entityculling', 'immediatelyfast', 'modernfix', 'dynamic-fps',
-    'moreculling', 'ebe'],
-  quilt: ['lithium', 'immediatelyfast', 'dynamic-fps', 'moreculling', 'ebe'],
+    'moreculling', 'ebe', 'iris'],
+  quilt: ['lithium', 'immediatelyfast', 'dynamic-fps', 'moreculling', 'ebe', 'iris'],
   forge: ['entityculling', 'immediatelyfast', 'dynamic-fps'],
   neoforge: ['sodium', 'lithium', 'ferrite-core', 'entityculling', 'immediatelyfast', 'modernfix', 'dynamic-fps',
-    'moreculling', 'enhanced-block-entities-neoforged'],
+    'moreculling', 'enhanced-block-entities-neoforged', 'iris'],
   vanilla: [],
 };
 
-// JVM-флаги для пресета. Объём памяти приходит из настроек лаунчера, пресет его не меняет
+// JVM-флаги для пресета. Объём памяти приходит из настроек лаунчера, пресет его не меняет.
+// Раньше «Очень оптимизировано» добавляло -XX:TieredStopAtLevel=1 и -XX:+UseSerialGC, и это
+// давало обратный эффект: игра без JIT-разгона (только C1) держит низкий FPS, а SerialGC
+// на многогигабайтной куче Minecraft устраивает долгие паузы сборки мусора — то есть пресет
+// лагал сильнее «Оптимизировано». Теперь для него берём обычный G1 и не трогаем JIT: выигрыш
+// дают только настройки options.txt и моды-оптимизаторы, а не «облегчение» JVM.
 function launchTuning(preset, ram) {
   if (preset === 'potato') {
-    return {
-      ram,
-      gc: 'serial',
-      jvm: ['-XX:TieredStopAtLevel=1', '-XX:+DisableExplicitGC'],
-    };
+    return { ram, gc: 'g1', jvm: [] };
   }
   if (preset === 'optimized') {
     return { ram, gc: null, jvm: [] };
@@ -119,10 +122,44 @@ async function applyOptions(gameDir, preset) {
 // Моды, которые старый пакет ставил вместе и которые теперь конфликтуют (только NeoForge)
 const OBSOLETE = { neoforge: ['radium', 'embeddium'] };
 
+// Каталог со шейдерпаками, встроенными в лаунчер (resources/shaders в сборке)
+function shadersDir() {
+  const candidates = [
+    process.resourcesPath && path.join(process.resourcesPath, 'shaders'),
+    path.join(__dirname, '..', 'shaders'),
+  ].filter(Boolean);
+  return candidates.find(p => fs.existsSync(p)) || null;
+}
+
+// Копирует встроенные шейдерпаки в shaderpacks сборки (работают через Iris).
+// Файлы той же длины не переписываются — повторный запуск ничего не стоит.
+async function installShaders(inst) {
+  const src = shadersDir();
+  if (!src) return { copied: [], total: 0 };
+  const dest = path.join(instances.getGameDir(inst), 'shaderpacks');
+  await fsp.mkdir(dest, { recursive: true });
+  const names = (await fsp.readdir(src)).filter(n => /\.zip$/i.test(n)).sort();
+  const copied = [];
+  for (const name of names) {
+    const from = path.join(src, name);
+    const to = path.join(dest, name);
+    try {
+      const size = (await fsp.stat(from)).size;
+      let same = false;
+      try { same = (await fsp.stat(to)).size === size; } catch (_) { /* файла ещё нет */ }
+      if (same) continue;
+      await fsp.copyFile(from, to);
+      copied.push(name);
+    } catch (_) { /* один битый файл не должен ломать весь пакет */ }
+  }
+  return { copied, total: names.length };
+}
+
 // Ставит пакет модов под загрузчик сборки. Ошибки по отдельным модам не останавливают остальные.
+// После модов копирует встроенные шейдерпаки — это и есть «один клик» для Iris + шейдеров.
 async function installPack(inst, report = () => {}) {
   const slugs = PACK[inst.loader] || [];
-  if (!slugs.length) return { installed: [], skipped: [], unavailable: [], errors: [], note: 'Для Vanilla моды не ставятся' };
+  if (!slugs.length) return { installed: [], skipped: [], unavailable: [], errors: [], shaders: 0, note: 'Для Vanilla моды не ставятся' };
   // Убираем устаревшие моды пакета, но только те jar, которые поставил сам лаунчер (есть в его списке файлов)
   const old = OBSOLETE[inst.loader] || [];
   if (old.length) {
@@ -153,7 +190,11 @@ async function installPack(inst, report = () => {}) {
       else errors.push(`${slug}: ${e.message}`);
     }
   }
-  return { installed, skipped, unavailable, errors };
+  // Шейдеры: Iris уже в пакете, шейдерпаки копируются из ресурсов лаунчера в сборку
+  report({ stage: 'Оптимизация', text: 'Копирую шейдеры…' });
+  const sh = await installShaders(inst);
+  if (sh.copied.length) report({ stage: 'Оптимизация', text: `Шейдеры: добавлено ${sh.copied.length} из ${sh.total}` });
+  return { installed, skipped, unavailable, errors, shaders: sh.copied.length };
 }
 
 // Всё, что нужно при запуске: JVM, память, GC и настройки options.txt
@@ -171,4 +212,4 @@ async function prepareLaunch(inst, preset, ram, installMods, report = () => {}) 
   return launchTuning(preset, ram);
 }
 
-module.exports = { PRESETS, PACK, OPTIONS, launchTuning, applyOptions, installPack, prepareLaunch };
+module.exports = { PRESETS, PACK, OPTIONS, launchTuning, applyOptions, installPack, installShaders, prepareLaunch };

@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 const inv = (ch, ...args) => ipcRenderer.invoke(ch, ...args);
-const EVENTS = ['progress', 'log', 'game:state', 'mod:status'];
+const EVENTS = ['progress', 'log', 'game:state', 'mod:status', 'update:available', 'update:progress'];
 
 contextBridge.exposeInMainWorld('ember', {
   info: () => inv('app:info'),
@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('ember', {
     min: () => inv('win:min'),
     max: () => inv('win:max'),
     close: () => inv('win:close'),
+    dragStart: () => inv('win:dragStart'),
+    dragEnd: () => inv('win:dragEnd'),
   },
   settings: {
     get: () => inv('settings:get'),
@@ -20,6 +22,12 @@ contextBridge.exposeInMainWorld('ember', {
   },
   versions: () => inv('versions:list'),
   loaderVersions: (loader, mc) => inv('loader:versions', { loader, mc }),
+  rust: {
+    platforms: () => inv('rust:platforms'),
+    releases: (platform, fresh) => inv('rust:releases', { platform, fresh }),
+    info: () => inv('rust:info'),
+    prepare: (platform, tag) => inv('rust:prepare', { platform, tag }),
+  },
   instances: {
     list: () => inv('instances:list'),
     create: data => inv('instances:create', data),
@@ -28,7 +36,7 @@ contextBridge.exposeInMainWorld('ember', {
     open: id => inv('instances:open', id),
     duplicate: id => inv('instances:duplicate', id),
     exportZip: id => inv('instances:exportZip', id),
-    importZip: () => inv('instances:importZip'),
+    importZip: () => inv('import:zip'),
     backup: id => inv('instances:backup', id),
     folder: (id, sub) => inv('instances:folder', { id, sub }),
     setCover: (id, cover) => inv('instances:setCover', { id, cover }),
@@ -59,12 +67,34 @@ contextBridge.exposeInMainWorld('ember', {
     launch: id => inv('game:launch', id),
     stop: () => inv('game:stop'),
     status: () => inv('game:status'),
+    hide: () => inv('game:hide'),
+  },
+  accounts: {
+    list: () => inv('accounts:list'),
+    select: id => inv('accounts:select', id),
+    add: (type, payload, label) => inv('accounts:add', { type, payload, label }),
+    remove: id => inv('accounts:remove', id),
+    logout: id => inv('accounts:logout', id),
   },
   auth: {
-    ely: (login, password) => inv('auth:ely', { login, password }),
-    offline: name => inv('auth:offline', name),
-    logout: () => inv('auth:logout'),
+    msStart: () => inv('auth:msStart'),
+    msWait: () => inv('auth:msWait'),
+    msCancel: () => inv('auth:msCancel'),
   },
+  skins: {
+    sources: () => inv('skins:sources'),
+    catalog: () => inv('skins:catalog'),
+    search: (source, query) => inv('skins:search', { source, query }),
+    current: (accountId) => inv('skins:current', { accountId }),
+    apply: (accountId, opts) => inv('skins:apply', { accountId, ...opts }),
+    pickImage: () => inv('skins:pickImage'),
+  },
+  update: {
+    check: () => inv('update:check'),
+    download: asset => inv('update:download', asset),
+    install: (file, assetName) => inv('update:install', { file, assetName }),
+  },
+  copyText: text => inv('clipboard:copy', text),
   search: (source, opts) => inv('search', { source, ...opts }),
   install: (item, instanceId, opts = {}) => inv('install', { item, instanceId, update: !!opts.update }),
   showFile: p => inv('files:open', p),

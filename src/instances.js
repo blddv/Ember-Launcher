@@ -4,10 +4,14 @@ const path = require('path');
 const AdmZip = require('adm-zip');
 const { dirs } = require('./paths');
 const store = require('./store');
+const rust = require('./rust');
 
 const { pathToFileURL } = require('url');
 
-const LOADERS = ['vanilla', 'fabric', 'quilt', 'forge', 'neoforge'];
+// Java Edition: загрузчики модов. Rust-платформы — отдельные движки, а не загрузчики.
+const JAVA_LOADERS = ['vanilla', 'fabric', 'quilt', 'forge', 'neoforge'];
+const RUST_LOADERS = Object.keys(rust.PLATFORMS);
+const LOADERS = [...JAVA_LOADERS, ...RUST_LOADERS];
 const COVERS = path.join(dirs.base, 'covers');
 const EXPORT_MARK = 'ember-instance.json';
 // Что не копируем при дублировании и экспорте (тяжёлое или временное)
@@ -15,6 +19,22 @@ const SKIP_DIRS = new Set(['logs', 'crash-reports', 'debug', '.cache']);
 
 function getGameDir(inst) {
   return path.join(dirs.instances, inst.id);
+}
+
+// Платформа сборки: 'java' (обычный Minecraft), 'horizon' или 'rustcraft'.
+// В старых сборках поля platform нет — это Java.
+function platformOf(inst) {
+  if (!inst) return 'java';
+  if (inst.platform === 'java' || inst.platform === 'horizon' || inst.platform === 'rustcraft') return inst.platform;
+  return rust.PLATFORMS[inst.loader] ? inst.loader : 'java';
+}
+
+function isRust(inst) {
+  return platformOf(inst) !== 'java';
+}
+
+function loadersFor(platform) {
+  return platform === 'java' ? JAVA_LOADERS : [platform];
 }
 
 function coverFile(id) {
@@ -65,21 +85,28 @@ function slugOf(name) {
   return (name || 'instance').toLowerCase().replace(/[^a-z0-9а-яё]+/gi, '-').replace(/^-|-$/g, '').slice(0, 32) || 'instance';
 }
 
-function create({ name, version, loader = 'vanilla', loaderVersion = '' }) {
-  if (!LOADERS.includes(loader)) throw new Error(`Неизвестный загрузчик: ${loader}`);
+function create({ name, version, loader = 'vanilla', loaderVersion = '', platform }) {
+  const target = rust.PLATFORMS[loader] ? loader : (platform && platform !== 'java' ? platform : 'java');
+  if (target === 'java' && !JAVA_LOADERS.includes(loader)) throw new Error(`Неизвестный загрузчик: ${loader}`);
+  if (target !== 'java' && loader !== target) {
+    throw new Error(`Для платформы ${target} загрузчик должен быть ${target}, а не ${loader}`);
+  }
   const id = `${slugOf(name)}-${Date.now().toString(36)}`;
   const inst = {
     id,
     name: name || 'Новая сборка',
+    platform: target,
     version,
-    loader,
+    loader: target === 'java' ? loader : target,
     loaderVersion: loaderVersion || '',
     createdAt: Date.now(),
     playMs: 0,
     lastPlayed: 0,
   };
   const dir = getGameDir(inst);
-  fs.mkdirSync(path.join(dir, 'mods'), { recursive: true });
+  // Папка модов у каждой платформы своя: у Java — mods, у Horizon — horizon-mods
+  fs.mkdirSync(path.join(dir, target === 'horizon' ? 'horizon-mods' : 'mods'), { recursive: true });
+  if (target === 'horizon') fs.mkdirSync(path.join(dir, 'resourcepacks'), { recursive: true });
   store.set('instances', [...store.get('instances'), inst]);
   if (!store.get('selectedInstance')) store.set('selectedInstance', id);
   return withDir(inst);
@@ -112,7 +139,13 @@ function remove(id) {
 // Копирует сборку: настройки, моды, конфиги и миры (без логов и краш-репортов).
 async function duplicate(id, newName) {
   const src = find(id);
-  const copy = create({ name: newName || `${src.name} (копия)`, version: src.version, loader: src.loader, loaderVersion: src.loaderVersion });
+  const copy = create({
+    name: newName || `${src.name} (копия)`,
+    version: src.version,
+    platform: platformOf(src),
+    loader: src.loader,
+    loaderVersion: src.loaderVersion,
+  });
   await fsp.cp(src.gameDir, copy.gameDir, {
     recursive: true,
     force: true,
@@ -126,8 +159,9 @@ function exportZip(id, targetFile) {
   const inst = find(id);
   const zip = new AdmZip();
   zip.addFile(EXPORT_MARK, Buffer.from(JSON.stringify({
-    format: 1,
+    format: 2,
     name: inst.name,
+    platform: platformOf(inst),
     version: inst.version,
     loader: inst.loader,
     loaderVersion: inst.loaderVersion,
@@ -152,10 +186,14 @@ function importZip(file) {
   const entry = zip.getEntry(EXPORT_MARK);
   if (!entry) throw new Error('Это не экспорт EMBER: нет файла ember-instance.json');
   const meta = JSON.parse(entry.getData().toString('utf8'));
+  const platform = meta.platform === 'horizon' || meta.platform === 'rustcraft'
+    ? meta.platform
+    : (rust.PLATFORMS[meta.loader] ? meta.loader : 'java');
   const inst = create({
     name: meta.name || 'Импорт',
     version: meta.version,
-    loader: LOADERS.includes(meta.loader) ? meta.loader : 'vanilla',
+    platform,
+    loader: LOADERS.includes(meta.loader) ? meta.loader : (platform === 'java' ? 'vanilla' : platform),
     loaderVersion: meta.loaderVersion || '',
   });
   zip.extractAllTo(inst.gameDir, true);
@@ -164,6 +202,6 @@ function importZip(file) {
 }
 
 module.exports = {
-  LOADERS, list, find, create, update, remove, duplicate, exportZip, importZip, addPlaytime, getGameDir,
-  setCover, clearCover, lastCrash,
+  LOADERS, JAVA_LOADERS, RUST_LOADERS, list, find, create, update, remove, duplicate, exportZip, importZip,
+  addPlaytime, getGameDir, setCover, clearCover, lastCrash, platformOf, isRust, loadersFor,
 };
