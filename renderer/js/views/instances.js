@@ -1,3 +1,4 @@
+(function () {
 // Вкладка «Сборки»: список, карточки, модалки создания/обложки/краш-отчёта/модов,
 // командная палитра и поиск обложек.
 const EMB = (window.EMB = window.EMB || {});
@@ -176,7 +177,7 @@ EMB.modals.modalNewInstance = function modalNewInstance() {
       </div>
       <div class="actions">
         <button class="btn" data-act="close-modal">${t('Отмена')}</button>
-        <button class="btn primary" data-act="create-inst">${t('Создать')}</button>
+        <button class="btn primary" data-act="create-inst" ${!rust && !versions.length ? 'disabled' : ''}>${t('Создать')}</button>
       </div>
     </div>
   </div>`;
@@ -452,3 +453,5 @@ EMB.modals.runCoverSearch = async function runCoverSearch() {
   cs.loading = false;
   EMB.modals.paintCoverResults();
 };
+
+})();

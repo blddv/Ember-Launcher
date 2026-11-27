@@ -1,3 +1,4 @@
+(function () {
 // Модель интерфейса: навигация, списки источников/загрузчиков, состояние
 // приложения и чистыеhelper-функции (без доступа к IPC).
 const EMB = (window.EMB = window.EMB || {});
@@ -177,3 +178,5 @@ EMB.currentPreset = () => {
   const el = document.querySelector('input[name="preset"]:checked');
   return el ? el.value : EMB.state.settings.perf.preset;
 };
+
+})();

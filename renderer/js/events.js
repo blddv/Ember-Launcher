@@ -1,3 +1,4 @@
+(function () {
 // Обработчики интерфейса: клики, переключатели, ввод, клавиатура, drag-регион
 // и события из main-процесса.
 const EMB = (window.EMB = window.EMB || {});
@@ -707,3 +708,5 @@ document.addEventListener('keydown', e => {
     return EMB.renderModal();
   }
 });
+
+})();

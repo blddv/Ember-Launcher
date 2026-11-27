@@ -110,9 +110,10 @@ async function listReleases(id, { fresh = false } = {}) {
     raw = await fetchJson(`${GH}/repos/${p.repo}/releases?per_page=40`, { headers: ghHeaders() });
   } catch (e) {
     if (e && e.status === 403) throw new Error(`${p.label}: GitHub ограничил запросы. Добавьте токен GitHub в Настройках`);
-    if (e && e.status === 404) throw new Error(`${p.label}: репозиторий ${p.repo} недоступен`);
+    if (e && e.status === 404) throw new Error(`${p.label}: репозиторий ${p.repo} недоступен (GitHub 404: удалён, скрыт или перемещён). Скачать движок по этому адресу нельзя; это не пустой список версий Minecraft.`);
     throw new Error(`${p.label}: не удалось получить список версий (${e.message})`);
   }
+  if (!Array.isArray(raw)) throw new Error(`${p.label}: GitHub вернул неожиданный список релизов`);
   const out = [];
   for (const r of raw) {
     if (r.draft) continue;
@@ -129,6 +130,12 @@ async function listReleases(id, { fresh = false } = {}) {
       url: asset.browser_download_url,
       platform: id,
     });
+  }
+  if (!out.length) {
+    const published = raw.some(r => !r.draft);
+    throw new Error(published
+      ? `${p.label}: в релизах ${p.repo} нет готового движка для ${process.platform}/${process.arch}`
+      : `${p.label}: в репозитории ${p.repo} пока нет опубликованных релизов. Скачать движок нельзя.`);
   }
   releasesCache.set(id, { t: Date.now(), list: out });
   return out;
@@ -415,10 +422,9 @@ async function launch({ instance, report = () => {}, onLog = () => {}, onExit = 
   if (!p) throw new Error(`Сборка «${instance.name}»: неизвестная Rust-платформа ${instance.loader}`);
   if (p.javaExec) throw new Error(`${p.label} запускается через аргументы игры, а не напрямую`);
 
-  const latest = await latestRelease(p.id, { fresh: false }).catch(() => null);
-  const tag = instance.loaderVersion || (latest && latest.tag);
+  const tag = instance.loaderVersion || (await latestRelease(p.id)).tag;
   if (!tag) {
-    throw new Error(`${p.label}: не удалось определить версию движка. Проверьте интернет или нажмите «Скачать движок» во вкладке «Minecraft Rust».`);
+    throw new Error(`${p.label}: не удалось определить версию движка`);
   }
   report({ stage: p.label, text: `Проверяю ${p.label} ${tag}…` });
   const engine = await ensureEngine(p.id, tag, report, onLog);

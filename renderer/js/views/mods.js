@@ -1,3 +1,4 @@
+(function () {
 // Вкладка «Моды и сборки»: источники, фильтры, предупреждения, поиск по ссылке.
 const EMB = (window.EMB = window.EMB || {});
 const { t } = EMB;
@@ -111,3 +112,5 @@ EMB.views.mods.linkPanel = function linkPanel() {
       </div>
     </div>`;
 };
+
+})();

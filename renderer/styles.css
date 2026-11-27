@@ -677,3 +677,7 @@ body.no-anim *, body.no-anim *::before, body.no-anim *::after {
 .item.installed h4 { text-decoration: line-through; text-decoration-color: var(--orange); color: var(--muted); }
 .item.outdated { border-color: rgba(255, 113, 0, .6); }
 .item.installed .btn[disabled] { cursor: default; color: var(--orange); border-color: rgba(255, 113, 0, .45); background: rgba(255, 113, 0, .08); }
+
+/* Статический экран доступен даже при ошибке сценариев или preload. */
+.startup { grid-area: 1 / 1 / -1 / -1; padding: 40px; align-self: center; justify-self: center; max-width: 760px; }
+.startup p { color: var(--muted); overflow-wrap: anywhere; }

@@ -7,7 +7,17 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div id="app"></div>
+  <div id="app">
+    <section class="startup" role="status">
+      <h1>EMBER Launcher</h1>
+      <p id="startup-message">Загрузка интерфейса…</p>
+      <div class="row">
+        <button class="btn" id="startup-reload">Повторить запуск</button>
+        <button class="btn" id="startup-close">Закрыть</button>
+      </div>
+    </section>
+  </div>
+  <script src="js/startup.js"></script>
   <div id="modal-root"></div>
   <div class="toasts" id="toasts"></div>
   <!-- Словари переводов (UMD: работают и в браузере и в Node) -->

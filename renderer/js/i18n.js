@@ -1,3 +1,4 @@
+(function () {
 // Система переводов интерфейса. Словари лежат в renderer/locales/*.js
 // и загружаются как обычные сценарии (window.EMB_LOCALES). Ключи — это
 // исходные русские строки UI: они же и являются дефолтным переводом.
@@ -19,9 +20,9 @@ EMB.i18nNames = {
   cs: 'Čeština', sk: 'Slovenčina', de: 'Deutsch', fr: 'Français', es: 'Español',
   it: 'Italiano', pt: 'Português', ro: 'Română', sv: 'Svenska', hu: 'Magyar',
 };
-EMB.i18n.names = EMB.i18nNames;
 
 EMB.i18n = {
+  names: EMB.i18nNames,
   lang: 'ru',
   list: Object.keys(LOCALES),
   shellReady: false,
@@ -45,3 +46,5 @@ EMB.t = function t(key, vars) {
   if (vars) s = s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
   return s;
 };
+
+})();

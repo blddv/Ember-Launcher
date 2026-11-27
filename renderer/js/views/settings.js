@@ -1,3 +1,4 @@
+(function () {
 // Вкладка «Настройки»: производительность, окно, источники, обновления,
 // Orange Visuals, папка данных и выбор языка интерфейса.
 const EMB = (window.EMB = window.EMB || {});
@@ -183,3 +184,5 @@ EMB.settingsView.setOvKey = async function setOvKey(field, code) {
   }
   EMB.renderView();
 };
+
+})();

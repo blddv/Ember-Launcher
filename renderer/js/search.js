@@ -1,3 +1,4 @@
+(function () {
 // Машинный состояния поиска модов: выдача, бесконечная прокрутка, статусы
 // установленных модов и установка.
 const EMB = (window.EMB = window.EMB || {});
@@ -194,3 +195,5 @@ EMB.search.itemCard = function itemCard(it, idx) {
       </div>
     </div>`;
 };
+
+})();

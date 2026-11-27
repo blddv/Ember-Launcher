@@ -1,3 +1,4 @@
+(function () {
 // Вкладка «Аккаунт»: мультиаккаунтинг, вход по коду Microsoft, Ely.by, оффлайн.
 const EMB = (window.EMB = window.EMB || {});
 const { t } = EMB;
@@ -85,3 +86,5 @@ EMB.views.account = function viewAccount() {
       </div>
     </div>`;
 };
+
+})();

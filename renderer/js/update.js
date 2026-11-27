@@ -1,3 +1,4 @@
+(function () {
 // Автообновление лаунчера: проверка, загрузка, установка и состояние.
 const EMB = (window.EMB = window.EMB || {});
 const { t } = EMB;
@@ -91,3 +92,5 @@ EMB.updateFlow.applyLite = function applyLite() {
 EMB.updateFlow.applyAnimations = function applyAnimations() {
   document.body.classList.toggle('no-anim', !EMB.state.settings.animations);
 };
+
+})();
