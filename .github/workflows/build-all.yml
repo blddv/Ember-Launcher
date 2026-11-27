@@ -48,7 +48,10 @@ jobs:
         run: npm ci
 
       - name: Run tests
-        run: npm test
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-log.txt
 
       - name: Validate release version
         shell: bash
@@ -67,13 +70,17 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          echo "::error::$(tail -c 3500 dist-log.txt | tr '\n' ' | ')"
-          {
-            echo "## Build log tail"
-            echo '```'
-            tail -n 50 dist-log.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          for log in test-log.txt dist-log.txt; do
+            if [ -f "$log" ]; then
+              echo "::error::$(tail -c 3500 "$log" | tr '\n' ' | ')"
+              {
+                echo "## $log"
+                echo '```'
+                tail -n 60 "$log"
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
 
       - name: Keep builds as workflow artifacts
         if: always()
