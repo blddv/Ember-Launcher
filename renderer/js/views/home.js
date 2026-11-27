@@ -1,3 +1,4 @@
+(function () {
 // Вкладка «Главная».
 const EMB = (window.EMB = window.EMB || {});
 const { t } = EMB;
@@ -76,3 +77,5 @@ EMB.views.home = function viewHome() {
       </div>
     </div>`;
 };
+
+})();

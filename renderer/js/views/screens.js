@@ -1,3 +1,4 @@
+(function () {
 // Вкладка «Скриншоты».
 const EMB = (window.EMB = window.EMB || {});
 const { t } = EMB;
@@ -28,3 +29,5 @@ EMB.loadScreens = async function loadScreens() {
   try { EMB.state.screens = await window.ember.screenshots(); } catch (e) { EMB.state.screens = []; EMB.toast(e.message, 'err'); }
   if (EMB.state.view === 'screens') EMB.renderView();
 };
+
+})();

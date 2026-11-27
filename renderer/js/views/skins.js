@@ -1,3 +1,4 @@
+(function () {
 // Вкладка «Скины»: каталоги, поиск по нику, текущий скин, применение.
 const EMB = (window.EMB = window.EMB || {});
 const { t } = EMB;
@@ -112,3 +113,5 @@ EMB.views.skins = function viewSkins() {
     ${hint}
     ${s.applying ? `<div class="hint" style="margin-top:12px">${t('Применяю скин…')}</div>` : ''}`;
 };
+
+})();

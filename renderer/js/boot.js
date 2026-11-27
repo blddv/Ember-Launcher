@@ -1,3 +1,4 @@
+(function () {
 // Запуск интерфейса: подготовка состояния и первичная отрисовка.
 const EMB = (window.EMB = window.EMB || {});
 const { t } = EMB;
@@ -18,7 +19,7 @@ async function boot() {
     EMB.toast(t('Запущено под Wayland: если мышь не работает, добавьте --ozone-platform=x11'), 'err');
   }
   EMB.state.settings = await window.ember.settings.get();
-  await EMB.actions.loadAccounts();
+  await EMB.actions.loadAccounts({ waitForSkin: false });
   // Каталоги скинов
   try { EMB.state.skins.sources = await window.ember.skins.sources(); } catch (_) { EMB.state.skins.sources = []; }
   try { EMB.state.skins.catalog = await window.ember.skins.catalog(); } catch (_) { EMB.state.skins.catalog = []; }
@@ -26,10 +27,6 @@ async function boot() {
   EMB.updateFlow.applyAnimations();
   EMB.updateFlow.applyLite();
   EMB.state.logs = '';
-  EMB.state.versions = await window.ember.versions().catch(err => {
-    EMB.toast(EMB.t('Не удалось загрузить список версий Minecraft: {msg}', { msg: err.message }), 'err');
-    return [];
-  });
   const r = await window.ember.instances.list();
   EMB.state.instances = r.list;
   EMB.state.selected = r.selected;
@@ -45,8 +42,23 @@ async function boot() {
   EMB.renderShell();
   EMB.i18n.shellReady = true;
   EMB.renderView();
+  // Манифест Mojang зависит от сети: окно и кнопки не должны ждать его загрузки.
+  window.ember.versions().then(versions => {
+    EMB.state.versions = versions;
+    const modal = EMB.state.modal;
+    if (modal && modal.type === 'new' && (modal.platform || 'java') === 'java') {
+      EMB.modals.syncModal();
+      if (!modal.version) modal.version = EMB.releaseId();
+      EMB.renderModal();
+      EMB.modals.ensureLoaderList(modal.loader, modal.version);
+    }
+  }).catch(err => {
+    EMB.toast(EMB.t('Не удалось загрузить список версий Minecraft: {msg}', { msg: err.message }), 'err');
+  });
 }
 
 boot().catch(err => {
-  document.getElementById('app').innerHTML = `<div style="padding:40px;color:#FFB2B2">${t('Ошибка запуска: {msg}', { msg: EMB.esc(err.message) })}</div>`;
+  window.EMBER_STARTUP.showError(err, true);
 });
+
+})();

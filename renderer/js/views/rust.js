@@ -1,3 +1,4 @@
+(function () {
 // Вкладка «Minecraft на Rust»: карточки платформ, движки и инструкции.
 const EMB = (window.EMB = window.EMB || {});
 const { t } = EMB;
@@ -31,7 +32,7 @@ EMB.rustView.card = function rustCard(r) {
       : `<div class="hint" style="margin-bottom:12px">${t('Движок ещё не скачан: загрузится при первом запуске.')}</div>`}
     <div class="row">
       <button class="btn primary" data-act="rust-new" data-platform="${r.id}">${EMB.icon('plus')} ${t('Создать сборку')}</button>
-      <button class="btn" data-act="rust-prepare" data-platform="${r.id}" data-tag="${latest ? EMB.esc(latest.tag) : ''}">${EMB.icon('download')} ${t('Скачать движок')}</button>
+      <button class="btn" data-act="rust-prepare" ${!latest ? 'disabled' : ''} data-platform="${r.id}" data-tag="${latest ? EMB.esc(latest.tag) : ''}">${EMB.icon('download')} ${t('Скачать движок')}</button>
       <button class="btn" data-act="rust-site" data-url="${EMB.esc(r.site)}">${EMB.icon('ext')} ${t('Сайт')}</button>
     </div>
   </div>`;
@@ -82,3 +83,5 @@ EMB.rustView.loadPage = async function loadRustPage(fresh = false) {
   }
   if (EMB.state.view === 'rust') EMB.renderView();
 };
+
+})();

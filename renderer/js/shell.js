@@ -1,3 +1,4 @@
+(function () {
 // Каркас интерфейса: обложка, боковая панель, переключение и отрисовка вкладок.
 const EMB = (window.EMB = window.EMB || {});
 const { t } = EMB;
@@ -99,3 +100,5 @@ EMB.renderBusy = function renderBusy() {
   const hp = EMB.$('#home-progress');
   if (hp) hp.innerHTML = EMB.progressHTML(EMB.state.progress);
 };
+
+})();

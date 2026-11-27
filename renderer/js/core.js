@@ -1,3 +1,4 @@
+(function () {
 // Утилиты интерфейса: DOM-помощники, форматирование, svg-иконки, всплывающие
 // сообщения и блок прогресса.
 const EMB = (window.EMB = window.EMB || {});
@@ -68,3 +69,5 @@ EMB.progressHTML = function progressHTML(p) {
     <div class="bar ${pct === null ? 'indet' : ''}"><i style="width:${pct || 0}%"></i></div>
   </div>`;
 };
+
+})();

@@ -1,3 +1,4 @@
+(function () {
 // Действия приложения: перезагрузка данных, запуск игры, импорт, моды-менеджер,
 // сохранение настроек и пресеты производительности.
 const EMB = (window.EMB = window.EMB || {});
@@ -145,13 +146,14 @@ EMB.actions.reloadSettings = async function reloadSettings() {
 };
 
 // Загружает список аккаунтов и выбирает активный
-EMB.actions.loadAccounts = async function loadAccounts() {
+EMB.actions.loadAccounts = async function loadAccounts({ waitForSkin = true } = {}) {
   const r = await window.ember.accounts.list();
   EMB.state.accounts = r.accounts || [];
   EMB.state.selectedAccountId = r.selected || null;
   EMB.state.account = EMB.state.accounts.find(a => a.id === EMB.state.selectedAccountId) || null;
   // Перезагружаем текущий скин для нового активного аккаунта
-  await EMB.actions.refreshCurrentSkin();
+  const skin = EMB.actions.refreshCurrentSkin();
+  if (waitForSkin) await skin;
 };
 
 // Загружает текущий скин активного аккаунта (для предпросмотра)
@@ -167,3 +169,5 @@ EMB.actions.refreshCurrentSkin = async function refreshCurrentSkin() {
   }
   if (EMB.state.view === 'skins') EMB.renderView();
 };
+
+})();
